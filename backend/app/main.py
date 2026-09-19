@@ -17,6 +17,7 @@ from app.api.routes.metrics import router as metrics_router
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.metrics import PrometheusMiddleware
+from app.core.version import VERSION
 from app.db.redis import close_redis as close_redis_client
 from app.services import outbox as outbox_service
 
@@ -51,16 +52,17 @@ async def _outbox_relay_loop() -> None:
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.5.0",
+    version=VERSION,
     lifespan=lifespan,
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
 
+cors_origins = settings.cors_origins_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials="*" not in cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

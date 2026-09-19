@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     debug: bool = False
     api_v1_prefix: str = "/api/v1"
 
+    cors_origins: str = "*"
+    queued_reconcile_seconds: float = 60.0
+
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/distributed_platform"
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     redis_url: str = "redis://localhost:6379/0"
@@ -40,6 +43,10 @@ class Settings(BaseSettings):
 
     redis_events_enabled: bool = True
     events_channel: str = "task_platform.events"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

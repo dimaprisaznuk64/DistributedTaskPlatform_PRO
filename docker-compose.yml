@@ -55,6 +55,7 @@ services:
     environment:
       APP_ENV: dev
       LOG_JSON: ${LOG_JSON:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-distributed_platform}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
@@ -97,6 +98,7 @@ services:
       WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-15}
       WORKER_HEARTBEAT_TIMEOUT_SECONDS: ${WORKER_HEARTBEAT_TIMEOUT_SECONDS:-60}
       TASK_LEASE_SECONDS: ${TASK_LEASE_SECONDS:-60}
+      QUEUED_RECONCILE_SECONDS: ${QUEUED_RECONCILE_SECONDS:-60}
       RETRY_SCHEDULER_POLL_SECONDS: ${RETRY_SCHEDULER_POLL_SECONDS:-2}
     depends_on:
       postgres:

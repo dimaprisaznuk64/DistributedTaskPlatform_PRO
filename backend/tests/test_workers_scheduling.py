@@ -304,3 +304,93 @@ async def test_worker_claim_then_requeued_runs_again(
         assert task.status == "success"
         assert task.attempts == 2
         assert task.lease_owner is None
+
+
+def _stale(task: Task) -> None:
+    task.updated_at = _now() - timedelta(seconds=120)
+
+
+@pytest.mark.asyncio
+async def test_fresh_queued_task_not_orphaned(client, session_factory, monkeypatch) -> None:
+    await client.post("/api/v1/tasks", json={"task_type": "echo"})
+
+    monkeypatch.setattr(coordinator, "session_factory", session_factory)
+    republished = await coordinator.requeue_orphaned_queued_tasks()
+    assert republished == 0
+
+    async with session_factory() as session:
+        outbox = list((await session.execute(select(OutboxEvent))).scalars().all())
+        assert len(outbox) == 1  # лише подія первинної публікації
+
+
+@pytest.mark.asyncio
+async def test_stale_queued_task_republished(client, session_factory, monkeypatch) -> None:
+    created = await client.post("/api/v1/tasks", json={"task_type": "echo"})
+    task_id = created.json()["task"]["id"]
+
+    async with session_factory() as session:
+        task = await tasks_service.get_task(session, task_id)
+        _stale(task)
+        await session.commit()
+
+    monkeypatch.setattr(coordinator, "session_factory", session_factory)
+    republished = await coordinator.requeue_orphaned_queued_tasks()
+    assert republished == 1
+
+    async with session_factory() as session:
+        task = await tasks_service.get_task(session, task_id)
+        assert task.status == "queued"
+        outbox = list((await session.execute(select(OutboxEvent))).scalars().all())
+        assert len(outbox) == 2  # первинна + повторна публікація
+
+
+@pytest.mark.asyncio
+async def test_stale_queued_with_active_lease_not_republished(
+    client, session_factory, monkeypatch
+) -> None:
+    created = await client.post("/api/v1/tasks", json={"task_type": "echo"})
+    task_id = created.json()["task"]["id"]
+
+    async with session_factory() as session:
+        task = await tasks_service.get_task(session, task_id)
+        _stale(task)
+        task.lease_owner = "w-active"
+        task.lease_expires_at = _now() + timedelta(seconds=120)
+        await session.commit()
+
+    monkeypatch.setattr(coordinator, "session_factory", session_factory)
+    republished = await coordinator.requeue_orphaned_queued_tasks()
+    assert republished == 0
+
+    async with session_factory() as session:
+        outbox = list((await session.execute(select(OutboxEvent))).scalars().all())
+        assert len(outbox) == 1
+
+
+@pytest.mark.asyncio
+async def test_orphaned_queued_recovers_to_success(
+    client, session_factory, monkeypatch
+) -> None:
+    created = await client.post(
+        "/api/v1/tasks", json={"task_type": "echo", "payload": {"message": "lost"}}
+    )
+    task_id = created.json()["task"]["id"]
+
+    async with session_factory() as session:
+        task = await tasks_service.get_task(session, task_id)
+        _stale(task)
+        await session.commit()
+
+    monkeypatch.setattr(coordinator, "session_factory", session_factory)
+    assert await coordinator.requeue_orphaned_queued_tasks() == 1
+
+    message = _msg_for(task_id)
+    monkeypatch.setattr(worker_main, "session_factory", session_factory)
+    await worker_main.handle_message(message)
+    assert message.acked
+
+    async with session_factory() as session:
+        task = await tasks_service.get_task(session, task_id)
+        assert task.status == "success"
+        assert task.attempts == 1
+        assert task.lease_owner is None

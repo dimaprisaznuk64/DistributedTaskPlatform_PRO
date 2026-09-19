@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import metrics
@@ -20,6 +20,59 @@ logger = logging.getLogger(__name__)
 
 DUE_STATUSES = ("retry_scheduled", "scheduled")
 STUCK_STATUSES = ("queued", "running")
+
+
+async def requeue_orphaned_queued_tasks(limit: int = 200) -> int:
+    """Повторно публікує queued-задачі, що «зависли» без повідомлення в черзі.
+
+    Якщо задача довше queued_reconcile_seconds лежить у status=queued і ніхто
+    не тримає на ній активний lease, її повідомлення, найімовірніше, загубилося
+    (напр. після втрати черги). Повторна публікація безпечна: дублікат виконується
+    не більш ніж один раз завдяки атомарному lease-захопленню.
+    """
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(seconds=settings.queued_reconcile_seconds)
+    count = 0
+    async with session_factory() as session:
+        result = await session.execute(
+            _lock(
+                select(Task)
+                .where(
+                    Task.status == "queued",
+                    Task.updated_at <= cutoff,
+                    or_(
+                        Task.lease_owner.is_(None),
+                        Task.lease_expires_at.is_(None),
+                        Task.lease_expires_at < now,
+                    ),
+                )
+                .order_by(Task.updated_at.asc())
+                .limit(limit),
+                session,
+            )
+        )
+        stuck = list(result.scalars().all())
+        for task in stuck:
+            session.add(
+                OutboxEvent(
+                    routing_key=settings.routing_key_task_created,
+                    payload={
+                        "task_id": task.id,
+                        "task_type": task.task_type,
+                        "payload": task.payload,
+                        "priority": task.priority,
+                        "reattempt": True,
+                    },
+                )
+            )
+            count += 1
+        await session.commit()
+    if count:
+        logger.info("Повторно опубліковано orphan-задач (queued): %s", count)
+        metrics.retries_total.inc(count)
+    for task in stuck:
+        events_service.schedule_task_event("task.updated", task)
+    return count
 
 
 def _lock(stmt, session: AsyncSession):

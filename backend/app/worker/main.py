@@ -159,8 +159,14 @@ async def run_coordinator() -> None:
         try:
             requeued = await coordinator.requeue_due_tasks()
             recovered = await coordinator.recover_stuck_tasks()
-            if requeued or recovered:
-                logger.info("У чергу повернуто: %s, відновлено: %s", requeued, recovered)
+            orphaned = await coordinator.requeue_orphaned_queued_tasks()
+            if requeued or recovered or orphaned:
+                logger.info(
+                    "У чергу повернуто: %s, відновлено: %s, orphan-перепубліковано: %s",
+                    requeued,
+                    recovered,
+                    orphaned,
+                )
         except Exception:
             logger.exception("Координатор: помилка тику")
         await asyncio.sleep(settings.retry_scheduler_poll_seconds)
