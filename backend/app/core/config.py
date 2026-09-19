@@ -16,6 +16,17 @@ class Settings(BaseSettings):
     cors_origins: str = "*"
     queued_reconcile_seconds: float = 60.0
 
+    jwt_secret: str = "dev-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+    refresh_token_expire_days: int = 7
+
+    admin_username: str = "admin"
+    admin_password: str = "admin"
+
+    auth_rate_limit_minutes: float = 1.0
+    auth_rate_limit_max: int = 10
+
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/distributed_platform"
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     redis_url: str = "redis://localhost:6379/0"

@@ -122,6 +122,11 @@ async def test_ws_stream_forwards_frames(client, monkeypatch) -> None:
 
     from starlette.testclient import TestClient
 
-    with TestClient(app) as tc, tc.websocket_connect("/api/v1/ws/events") as ws:
+    from app.services import auth as auth_service
+
+    token = auth_service.create_access_token(1)
+    with TestClient(app) as tc, tc.websocket_connect(
+        f"/api/v1/ws/events?token={token}"
+    ) as ws:
         assert ws.receive_text() == frames[0]
         assert ws.receive_text() == frames[1]

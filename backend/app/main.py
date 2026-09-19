@@ -19,6 +19,7 @@ from app.core.logging import setup_logging
 from app.core.metrics import PrometheusMiddleware
 from app.core.version import VERSION
 from app.db.redis import close_redis as close_redis_client
+from app.services import auth as auth_service
 from app.services import outbox as outbox_service
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ DASHBOARD_HTML = Path(__file__).parent / "static" / "dashboard.html"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     setup_logging()
+    await auth_service.bootstrap_admin()
     relay_task = asyncio.create_task(_outbox_relay_loop())
     try:
         yield

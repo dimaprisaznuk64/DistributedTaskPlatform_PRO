@@ -40,9 +40,32 @@
   .log div { padding: 4px 0; border-bottom: 1px dashed var(--border); }
   .log .t { color: var(--muted); }
   .full { grid-column: 1 / -1; }
+  .login-overlay {
+    position: fixed; inset: 0; background: rgba(2, 6, 23, .72); z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .login-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 320px; }
+  .login-box h2 { margin: 0 0 6px; font-size: 16px; }
+  .login-box p { color: var(--muted); font-size: 12px; margin: 0 0 16px; }
+  .login-box label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  .login-box input { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  .login-box button { margin-top: 16px; width: 100%; padding: 9px; border: 0; border-radius: 8px; background: var(--accent); color: #04121f; font-weight: 700; cursor: pointer; }
+  .login-err { color: var(--bad); font-size: 12px; min-height: 16px; margin-top: 8px; }
 </style>
 </head>
 <body>
+<div class="login-overlay" id="loginOverlay" hidden>
+  <form class="login-box" id="loginForm">
+    <h2>Вхід у дашборд</h2>
+    <p>Введіть облікові дані платформи</p>
+    <label for="user">Користувач</label>
+    <input id="user" autocomplete="username" required>
+    <label for="pass">Пароль</label>
+    <input id="pass" type="password" autocomplete="current-password" required>
+    <button type="submit">Увійти</button>
+    <div class="login-err" id="loginErr"></div>
+  </form>
+</div>
 <header>
   <h1>Операційний дашборд задач</h1>
   <div class="conn"><span class="dot" id="dot"></span><span id="connText">немає з\'єднання</span></div>
@@ -141,11 +164,30 @@ function pushLog(frame) {
   log.prepend(el);
   while (log.children.length > 60) log.lastChild.remove();
 }
+async function api(path, options = {}) {
+  const token = localStorage.getItem("access_token");
+  const headers = Object.assign({}, options.headers || {});
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const response = await fetch(path, Object.assign(options, { headers }));
+  if (response.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  return response;
+}
+function showLogin() {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+  $("loginOverlay").hidden = false;
+}
+function hideLogin() { $("loginOverlay").hidden = true; }
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/api/v1/ws/events`);
+  const token = localStorage.getItem("access_token") || "";
+  const ws = new WebSocket(`${proto}://${location.host}/api/v1/ws/events?token=${token}`);
   ws.onopen = () => { $("dot").classList.add("online"); $("connText").textContent = "live-канал активний"; };
-  ws.onclose = () => { $("dot").classList.remove("online"); $("connText").textContent = "немає з\'єднання, перепідключення..."; setTimeout(connect, 2000); };
+  ws.onclose = () => {
+    $("dot").classList.remove("online");
+    $("connText").textContent = token ? "немає з\'єднання, перепідключення..." : "немає з\'єднання";
+    setTimeout(() => { if (localStorage.getItem("access_token")) connect(); }, 2000);
+  };
   ws.onmessage = (event) => {
     let frame;
     try { frame = JSON.parse(event.data); } catch { return; }
@@ -160,15 +202,43 @@ function debounceRefresh() {
 }
 async function load() {
   const [stats, workers, tasks] = await Promise.all([
-    fetch("/api/v1/stats").then(r => r.json()),
-    fetch("/api/v1/workers").then(r => r.json()),
-    fetch("/api/v1/tasks?limit=10").then(r => r.json()),
+    api("/api/v1/stats").then(r => r.json()),
+    api("/api/v1/workers").then(r => r.json()),
+    api("/api/v1/tasks?limit=10").then(r => r.json()),
   ]);
   refreshStats(stats);
   refreshWorkers(workers);
   refreshTasks(tasks.items);
 }
-window.addEventListener("DOMContentLoaded", () => { load(); connect(); });
+async function handleLogin(event) {
+  event.preventDefault();
+  $("loginErr").textContent = "";
+  const body = JSON.stringify({
+    username: $("user").value.trim(),
+    password: $("pass").value,
+  });
+  const response = await fetch("/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  if (!response.ok) {
+    $("loginErr").textContent = "Невірний логін або пароль";
+    return;
+  }
+  const data = await response.json();
+  localStorage.setItem("access_token", data.access_token);
+  localStorage.setItem("refresh_token", data.refresh_token);
+  hideLogin();
+  load();
+  connect();
+}
+window.addEventListener("DOMContentLoaded", () => {
+  $("loginForm").addEventListener("submit", handleLogin);
+  if (!localStorage.getItem("access_token")) { showLogin(); return; }
+  load();
+  connect();
+});
 </script>
 </body>
 </html>

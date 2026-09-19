@@ -17,7 +17,8 @@ transactional outbox: подія записується в БД разом із 
 | **0.3** | кілька worker'ів, heartbeat, детекція мертвих worker'ів + відновлення завислих задач, пріоритетні черги, scheduled tasks, lease-виконання (claim/renew/recovery) |
 | **0.4** | Redis pub/sub як канал live-подій, WebSocket `/api/v1/ws/events`, операційний дашборд (статистика, воркери, live-стрічка), `GET /api/v1/stats`, RabbitMQ queue depth |
 | **0.5** | Prometheus `/metrics` + Grafana (provisioned dashboard), structured JSON-логи, HTTP-метрики, CI/CD (GitHub Actions), load/failure-тести |
-| **1.0 (поточна)** | Kubernetes-маніфести, HPA (worker/backend), посібник розгортання, консолідована версія 1.0.0, CORS через env, self-healing зниклих `queued`-задач, фінальна документація |
+| **1.0** | Kubernetes-маніфести, HPA (worker/backend), посібник розгортання, консолідована версія 1.0.0, CORS через env, self-healing зниклих `queued`-задач, фінальна документація |
+| **1.1 (поточна)** | Auth: users, bcrypt, JWT access+refresh, ролі (admin/operator/viewer), RBAC на API/REST/WS, rate limiting, захищений дашборд |
 
 ## Швидкий старт
 
@@ -101,19 +102,31 @@ Worker помер (нема heartbeat) => Координатор мітить de
 
 ## API
 
-| Метод | Шлях | Опис |
-|---|---|---|
-| POST | `/api/v1/tasks` | Створити задачу (поле `schedule_at` для відкладеного запуску; idempotent: повторний `idempotency_key` → 200 і та сама задача) |
-| GET | `/api/v1/tasks` | Список + фільтри `status`, `task_type`, `priority` |
-| GET | `/api/v1/tasks/{id}` | Деталі: спроби, історія подій |
-| POST | `/api/v1/tasks/{id}/retry` | Повторно запустити failed/cancelled/dead_letter |
-| POST | `/api/v1/tasks/{id}/cancel` | Скасувати created/queued/running/retry_scheduled/scheduled |
-| GET | `/api/v1/tasks/{id}/events` | Історія переходів статусів |
-| GET | `/api/v1/workers` | Список воркерів + стан heartbeat |
-| GET | `/metrics` | Prometheus-метрики (стан + HTTP + виконання) |
-| GET | `/api/v1/stats` | Агрегована статистика (задачі, спроби, воркери, глибина черги) |
-| WS | `/api/v1/ws/events` | Live-стрічка подій (проксіює Redis pub/sub) |
-| GET | `/` | Операційний дашборд (vanilla JS, без збірки) |
+> **Авторизація (v1.1):** усі ендпоінти `/api/v1/*` (окрім `/auth/*` і `/health`) вимагають
+> `Authorization: Bearer <access_token>`. Ролі: `admin` (усе + зміна ролей),
+> `operator` (створення/retry/cancel задач), `viewer` (читання). WS приймає токен
+> через query `?token=`. За замовчуванням створюється admin (`ADMIN_USERNAME`/`ADMIN_PASSWORD`).
+> Усі `/auth/*` обмежені rate limiter'ом (in-process, за IP).
+
+| Метод | Шлях | Опис | Доступ |
+|---|---|---|---|
+| POST | `/api/v1/auth/register` | Реєстрація (роль `viewer`) | public (rate-limited) |
+| POST | `/api/v1/auth/login` | Логін → access + refresh токени | public (rate-limited) |
+| POST | `/api/v1/auth/refresh` | Обмін refresh → новий access | public (rate-limited) |
+| GET | `/api/v1/auth/me` | Поточний користувач | авторизовані |
+| POST | `/api/v1/auth/users/{id}/role` | Зміна ролі користувача | admin |
+| POST | `/api/v1/tasks` | Створити задачу (поле `schedule_at` для відкладеного запуску; idempotent: повторний `idempotency_key` → 200 і та сама задача) | operator/admin |
+| GET | `/api/v1/tasks` | Список + фільтри `status`, `task_type`, `priority` | авторизовані |
+| GET | `/api/v1/tasks/{id}` | Деталі: спроби, історія подій | авторизовані |
+| POST | `/api/v1/tasks/{id}/retry` | Повторно запустити failed/cancelled/dead_letter | operator/admin |
+| POST | `/api/v1/tasks/{id}/cancel` | Скасувати created/queued/running/retry_scheduled/scheduled | operator/admin |
+| GET | `/api/v1/tasks/{id}/events` | Історія переходів статусів | авторизовані |
+| GET | `/api/v1/workers` | Список воркерів + стан heartbeat | авторизовані |
+| GET | `/api/v1/stats` | Агрегована статистика (задачі, спроби, воркери, глибина черги) | авторизовані |
+| WS | `/api/v1/ws/events?token=...` | Live-стрічка подій (проксіює Redis pub/sub) | авторизовані |
+| GET | `/metrics` | Prometheus-метрики (стан + HTTP + виконання) | public (для скрейпу) |
+| GET | `/` | Операційний дашборд (vanilla JS, з формою входу) | public (дані — через авторизований API) |
+| GET | `/health` | Перевірка живучості | public |
 
 ### Дашборд та live-події (v0.4)
 
@@ -138,7 +151,7 @@ backend з init-container для `alembic upgrade head`, воркер з HPA (CP
 і backend HPA (CPU 70%, 1–5 подів). Застосування:
 
 ```bash
-docker build -t distributed-task-platform:1.0.0 backend/   # minikube image load ...
+docker build -t distributed-task-platform:1.1.0 backend/   # minikube image load ...
 kubectl apply -k deploy/k8s
 kubectl -n tasks-platform rollout status deployment/worker
 kubectl -n tasks-platform port-forward svc/backend 8000:8000

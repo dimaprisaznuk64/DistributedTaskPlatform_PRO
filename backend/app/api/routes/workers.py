@@ -5,9 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.schemas.worker import WorkerInfo
+from app.services import auth as auth_service
 from app.services import workers as workers_service
 
-router = APIRouter(prefix="/workers", tags=["workers"])
+router = APIRouter(
+    prefix="/workers",
+    tags=["workers"],
+    dependencies=[Depends(auth_service.get_current_user)],
+)
 
 
 @router.get("", response_model=list[WorkerInfo])

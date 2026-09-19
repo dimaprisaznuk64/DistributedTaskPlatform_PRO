@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.models.task import TASK_PRIORITIES, TASK_STATUSES
+from app.models.user import User
 from app.schemas.task import (
     CancelResult,
     CreateResult,
@@ -17,10 +18,17 @@ from app.schemas.task import (
     TaskInfo,
     TaskList,
 )
+from app.services import auth as auth_service
 from app.services import events as events_service
 from app.services import tasks as tasks_service
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(
+    prefix="/tasks",
+    tags=["tasks"],
+    dependencies=[Depends(auth_service.get_current_user)],
+)
+
+OPERATOR = auth_service.require_roles("operator", "admin")
 
 
 def _conflict(detail: str) -> HTTPException:
@@ -30,6 +38,7 @@ def _conflict(detail: str) -> HTTPException:
 @router.post("", response_model=CreateResult, status_code=status.HTTP_201_CREATED)
 async def create_task(
     body: TaskCreate,
+    _: User = Depends(OPERATOR),
     session: AsyncSession = Depends(get_session),
 ) -> CreateResult | JSONResponse:
     if body.idempotency_key is not None:
@@ -104,6 +113,7 @@ async def get_task(
 @router.post("/{task_id}/retry", response_model=RetryResult)
 async def retry_task(
     task_id: int,
+    _: User = Depends(OPERATOR),
     session: AsyncSession = Depends(get_session),
 ) -> RetryResult:
     try:
@@ -120,6 +130,7 @@ async def retry_task(
 @router.post("/{task_id}/cancel", response_model=CancelResult)
 async def cancel_task(
     task_id: int,
+    _: User = Depends(OPERATOR),
     session: AsyncSession = Depends(get_session),
 ) -> CancelResult:
     try:

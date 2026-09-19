@@ -4,10 +4,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
+from app.services import auth as auth_service
 from app.services import queue_stats
 from app.services import stats as stats_service
 
-router = APIRouter(prefix="/stats", tags=["stats"])
+router = APIRouter(
+    prefix="/stats",
+    tags=["stats"],
+    dependencies=[Depends(auth_service.get_current_user)],
+)
 
 
 @router.get("")

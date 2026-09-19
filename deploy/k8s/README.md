@@ -6,13 +6,13 @@ RabbitMQ, Redis, backend API (з init-container для міграцій) і во
 ## 1. Збірка образу
 
 ```bash
-docker build -t distributed-task-platform:1.0.0 ./backend
+docker build -t distributed-task-platform:1.1.0 ./backend
 ```
 
 У мінікубі образ підхоплюється з локального registry без публікації:
 
 ```bash
-minikube image load distributed-task-platform:1.0.0
+minikube image load distributed-task-platform:1.1.0
 ```
 
 У реальному кластері образ треба спершу запушити в registry і замінити

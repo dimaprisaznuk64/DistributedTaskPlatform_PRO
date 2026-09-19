@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: distributed-task-platform:1.0.0
+          image: distributed-task-platform:1.1.0
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c", "python -m app.worker.main"]
           envFrom:

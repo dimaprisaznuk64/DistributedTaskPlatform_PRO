@@ -27,7 +27,7 @@ spec:
     spec:
       initContainers:
         - name: migrate
-          image: distributed-task-platform:1.0.0
+          image: distributed-task-platform:1.1.0
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c", "alembic upgrade head"]
           envFrom:
@@ -37,7 +37,7 @@ spec:
                 name: platform-config
       containers:
         - name: backend
-          image: distributed-task-platform:1.0.0
+          image: distributed-task-platform:1.1.0
           imagePullPolicy: IfNotPresent
           command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
           ports:
