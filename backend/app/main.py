@@ -5,21 +5,29 @@ import contextlib
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from app.api.router import api_router
 from app.api.routes.health import router as health_router
+from app.api.routes.metrics import router as metrics_router
 from app.core.config import settings
+from app.core.logging import setup_logging
+from app.core.metrics import PrometheusMiddleware
+from app.db.redis import close_redis as close_redis_client
 from app.services import outbox as outbox_service
 
 logger = logging.getLogger(__name__)
 
+DASHBOARD_HTML = Path(__file__).parent / "static" / "dashboard.html"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    logging.basicConfig(level=settings.log_level)
+    setup_logging()
     relay_task = asyncio.create_task(_outbox_relay_loop())
     try:
         yield
@@ -28,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         with contextlib.suppress(asyncio.CancelledError):
             await relay_task
         await outbox_service.close_connection()
+        await close_redis_client()
 
 
 async def _outbox_relay_loop() -> None:
@@ -42,7 +51,7 @@ async def _outbox_relay_loop() -> None:
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.2.0",
+    version="0.5.0",
     lifespan=lifespan,
     docs_url="/docs",
     openapi_url="/openapi.json",
@@ -55,6 +64,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PrometheusMiddleware)
+
+
+@app.get("/", include_in_schema=False, response_class=HTMLResponse)
+async def dashboard() -> HTMLResponse:
+    return HTMLResponse(DASHBOARD_HTML.read_text(encoding="utf-8"))
+
 
 app.include_router(health_router)
+app.include_router(metrics_router)
 app.include_router(api_router)

@@ -17,6 +17,7 @@ from app.schemas.task import (
     TaskInfo,
     TaskList,
 )
+from app.services import events as events_service
 from app.services import tasks as tasks_service
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -48,10 +49,12 @@ async def create_task(
             priority=body.priority,
             max_attempts=body.max_attempts,
             idempotency_key=body.idempotency_key,
+            schedule_at=body.schedule_at,
         )
     except IntegrityError as exc:
         raise _conflict("Задача з таким idempotency_key вже існує") from exc
     await session.commit()
+    events_service.schedule_task_event("task.updated", task)
     return CreateResult(task=TaskInfo.model_validate(task))
 
 
@@ -110,6 +113,7 @@ async def retry_task(
     if task is None:
         raise _not_found(task_id)
     await session.commit()
+    events_service.schedule_task_event("task.updated", task)
     return RetryResult(task=TaskInfo.model_validate(task))
 
 
@@ -125,6 +129,7 @@ async def cancel_task(
     if task is None:
         raise _not_found(task_id)
     await session.commit()
+    events_service.schedule_task_event("task.updated", task)
     return CancelResult(task=TaskInfo.model_validate(task))
 
 

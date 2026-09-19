@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд задач</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --border: #334155; --text: #e2e8f0;
+    --muted: #94a3b8; --accent: #38bdf8; --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 18px; margin: 0; }
+  .conn { font-size: 12px; color: var(--muted); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--bad); }
+  .dot.online { background: var(--ok); }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  section h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .card .n { font-size: 26px; font-weight: 700; }
+  .card .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+  .st-success { background: #052e22; color: var(--ok); }
+  .st-running { background: #0c2a44; color: var(--accent); }
+  .st-queued, .st-scheduled, .st-retry_scheduled, .st-created { background: #3b2f0a; color: var(--warn); }
+  .st-failed, .st-dead_letter, .st-timeout { background: #3f0d0d; color: var(--bad); }
+  .st-cancelled { background: #2a2f3a; color: var(--muted); }
+  .wk-alive { background: #052e22; color: var(--ok); }
+  .wk-dead { background: #3f0d0d; color: var(--bad); }
+  .bar { height: 8px; background: #0b1220; border-radius: 999px; overflow: hidden; margin-top: 8px; display: flex; }
+  .bar span { display: block; height: 100%; }
+  .log { max-height: 260px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 12px; }
+  .log div { padding: 4px 0; border-bottom: 1px dashed var(--border); }
+  .log .t { color: var(--muted); }
+  .full { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Операційний дашборд задач</h1>
+  <div class="conn"><span class="dot" id="dot"></span><span id="connText">немає з\'єднання</span></div>
+</header>
+
+<div class="cards">
+  <div class="card"><div class="n" id="cTotal">–</div><div class="l">Усього задач</div></div>
+  <div class="card"><div class="n" id="cQueued">–</div><div class="l">У черзі</div></div>
+  <div class="card"><div class="n" id="cRunning">–</div><div class="l">Виконуються</div></div>
+  <div class="card"><div class="n" id="cSuccess">–</div><div class="l">Успішні</div></div>
+</div>
+<div class="cards">
+  <div class="card"><div class="n" id="cFailed">–</div><div class="l">Помилки</div></div>
+  <div class="card"><div class="n" id="cDead">–</div><div class="l">Dead letter</div></div>
+  <div class="card"><div class="n" id="cWorkers">–</div><div class="l">Живі воркери</div></div>
+  <div class="card"><div class="n" id="cQueue">–</div><div class="l">У черзі RabbitMQ</div></div>
+</div>
+
+<main>
+  <section>
+    <h2>Пріоритети задач</h2>
+    <div id="priorities"></div>
+  </section>
+  <section>
+    <h2>Воркери</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Host</th><th>PID</th><th>Стан</th><th>Heartbeat</th></tr></thead>
+      <tbody id="workers"></tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Останні задачі</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Тип</th><th>Пріоритет</th><th>Стан</th><th>Спроби</th></tr></thead>
+      <tbody id="tasks"></tbody>
+    </table>
+  </section>
+  <section class="full">
+    <h2>Live-події</h2>
+    <div class="log" id="log"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const PRIORITY_COLORS = { critical: "#f87171", high: "#fbbf24", normal: "#38bdf8", low: "#64748b" };
+const STATUS_LABELS = {
+  created: "створена", queued: "у черзі", running: "виконується", retry_scheduled: "очікує повтору",
+  scheduled: "запланована", success: "успішна", failed: "помилка", cancelled: "скасована",
+  dead_letter: "dead letter", timeout: "таймаут",
+};
+const TYPE_LABELS = { "task.updated": "Задача оновлена", "task.running": "Задача запущена", "worker.alive": "Воркер живий", "worker.dead": "Воркер помер" };
+
+function badge(prefix, value) {
+  return `<span class="badge ${prefix}-${value}">${value}</span>`;
+}
+function refreshStats(data) {
+  const t = data.tasks, a = data.attempts, w = data.workers, q = data.queue;
+  $("cTotal").textContent = t.total;
+  $("cQueued").textContent = t.by_status.queued ?? 0;
+  $("cRunning").textContent = t.by_status.running ?? 0;
+  $("cSuccess").textContent = t.by_status.success ?? 0;
+  $("cFailed").textContent = t.by_status.failed ?? 0;
+  $("cDead").textContent = t.by_status.dead_letter ?? 0;
+  $("cWorkers").textContent = (w.by_status.alive ?? 0) + " / " + w.total;
+  $("cQueue").textContent = q && q.depth != null ? q.depth : "n/a";
+  let bars = "";
+  const total = Math.max(1, t.total);
+  for (const [p, n] of Object.entries(t.by_priority)) {
+    const pct = Math.round((n / total) * 100);
+    bars += `<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:8px">
+        <span>${p}</span><span>${n}</span></div>
+      <div class="bar"><span style="width:${pct}%;background:${PRIORITY_COLORS[p] || "#888"}"></span></div>`;
+  }
+  $("priorities").innerHTML = bars || "<div style='color:var(--muted);font-size:12px'>Немає задач</div>";
+}
+function refreshWorkers(items) {
+  $("workers").innerHTML = items.map(w =>
+    `<tr><td>${w.worker_id}</td><td>${w.hostname}</td><td>${w.pid}</td>
+     <td>${badge("wk", w.status)}</td>
+     <td>${new Date(w.last_heartbeat_at).toLocaleTimeString()}</td></tr>`
+  ).join("") || `<tr><td colspan="5" style="color:var(--muted)">Воркерів немає</td></tr>`;
+}
+function refreshTasks(items) {
+  $("tasks").innerHTML = items.map(task =>
+    `<tr><td>${task.id}</td><td>${task.task_type}</td><td>${task.priority}</td>
+     <td>${badge("st", task.status)}</td><td>${task.attempts}</td></tr>`
+  ).join("") || `<tr><td colspan="5" style="color:var(--muted)">Задач немає</td></tr>`;
+}
+function pushLog(frame) {
+  const el = document.createElement("div");
+  const label = TYPE_LABELS[frame.type] || frame.type;
+  const extra = frame.payload.task_id ? ` #${frame.payload.task_id}` : (frame.payload.worker_id ? ` ${frame.payload.worker_id}` : "");
+  el.innerHTML = `<span class="t">${new Date().toLocaleTimeString()}</span> ${label}${extra}`;
+  const log = $("log");
+  log.prepend(el);
+  while (log.children.length > 60) log.lastChild.remove();
+}
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/api/v1/ws/events`);
+  ws.onopen = () => { $("dot").classList.add("online"); $("connText").textContent = "live-канал активний"; };
+  ws.onclose = () => { $("dot").classList.remove("online"); $("connText").textContent = "немає з\'єднання, перепідключення..."; setTimeout(connect, 2000); };
+  ws.onmessage = (event) => {
+    let frame;
+    try { frame = JSON.parse(event.data); } catch { return; }
+    pushLog(frame);
+    debounceRefresh();
+  };
+}
+let refreshTimer = null;
+function debounceRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(load, 300);
+}
+async function load() {
+  const [stats, workers, tasks] = await Promise.all([
+    fetch("/api/v1/stats").then(r => r.json()),
+    fetch("/api/v1/workers").then(r => r.json()),
+    fetch("/api/v1/tasks?limit=10").then(r => r.json()),
+  ]);
+  refreshStats(stats);
+  refreshWorkers(workers);
+  refreshTasks(tasks.items);
+}
+window.addEventListener("DOMContentLoaded", () => { load(); connect(); });
+</script>
+</body>
+</html>

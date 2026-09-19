@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: tasks-platform
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: backend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: tasks-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      initContainers:
+        - name: migrate
+          image: distributed-task-platform:0.5.0
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "alembic upgrade head"]
+          envFrom:
+            - secretRef:
+                name: platform-credentials
+            - configMapRef:
+                name: platform-config
+      containers:
+        - name: backend
+          image: distributed-task-platform:0.5.0
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: platform-credentials
+            - configMapRef:
+                name: platform-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

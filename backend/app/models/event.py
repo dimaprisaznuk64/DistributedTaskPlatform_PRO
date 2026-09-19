@@ -10,6 +10,7 @@ from app.db.base import Base
 TASK_EVENT_TYPES = (
     "task.created",
     "task.queued",
+    "task.scheduled",
     "task.invalidated",
     "task.running",
     "task.attempt_started",
@@ -19,6 +20,7 @@ TASK_EVENT_TYPES = (
     "task.cancelled",
     "task.retried",
     "task.retry_scheduled",
+    "task.requeued",
     "task.dead_lettered",
 )
 

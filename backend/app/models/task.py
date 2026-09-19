@@ -12,6 +12,7 @@ TASK_STATUSES = (
     "queued",
     "running",
     "retry_scheduled",
+    "scheduled",
     "success",
     "failed",
     "cancelled",
@@ -36,6 +37,10 @@ class Task(Base, TimestampMixin):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_owner: Mapped[str | None] = mapped_column(String(100))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
     result: Mapped[dict | None] = mapped_column(JSON)
     last_error: Mapped[str | None] = mapped_column(String(2000))
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)

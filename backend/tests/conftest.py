@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_session
 from app.main import app
@@ -35,6 +36,7 @@ async def session_factory(db: AsyncEngine) -> async_sessionmaker:
 
 @pytest_asyncio.fixture
 async def client(db: AsyncEngine) -> AsyncClient:
+    settings.redis_events_enabled = False
     factory = async_sessionmaker(db, expire_on_commit=False, class_=AsyncSession)
 
     async def _get_session():

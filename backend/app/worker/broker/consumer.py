@@ -20,10 +20,14 @@ async def consume_tasks() -> AsyncIterator[aio_pika.abc.AbstractIncomingMessage]
         exchange = await channel.declare_exchange(
             settings.exchange_name, aio_pika.ExchangeType.TOPIC, durable=True, auto_delete=False
         )
-        queue = await channel.declare_queue("task_executions", durable=True)
+        queue = await channel.declare_queue(
+            settings.queue_name,
+            durable=True,
+            arguments={"x-max-priority": settings.queue_max_priority},
+        )
         await queue.bind(exchange, routing_key=settings.routing_key_task_created)
 
-        logger.info("Worker %s слухає чергу task_executions", settings.worker_id)
+        logger.info("Worker %s слухає чергу %s", settings.worker_id, settings.queue_name)
         async with queue.iterator() as queue_iter:
             async for message in queue_iter:
                 yield message

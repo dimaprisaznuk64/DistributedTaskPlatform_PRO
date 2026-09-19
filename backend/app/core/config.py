@@ -15,8 +15,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/distributed_platform"
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
+    redis_url: str = "redis://localhost:6379/0"
 
     log_level: str = "INFO"
+    log_json: bool = False
     outbox_poll_seconds: float = 2.0
     task_max_attempts: int = 3
     task_execution_timeout_seconds: int = 60
@@ -26,9 +28,18 @@ class Settings(BaseSettings):
     retry_max_delay_seconds: float = 300.0
     retry_scheduler_poll_seconds: float = 2.0
 
+    worker_id: str = "worker-1"
+    worker_heartbeat_seconds: float = 15.0
+    worker_heartbeat_timeout_seconds: float = 60.0
+    task_lease_seconds: float = 60.0
+
     exchange_name: str = "tasks"
     routing_key_task_created: str = "task_created"
-    worker_id: str = "worker-1"
+    queue_name: str = "task_executions"
+    queue_max_priority: int = 10
+
+    redis_events_enabled: bool = True
+    events_channel: str = "task_platform.events"
 
 
 @lru_cache

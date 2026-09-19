@@ -37,15 +37,34 @@ services:
     networks:
       - platform
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - platform
+
   backend:
     build:
       context: ./backend
     environment:
       APP_ENV: dev
+      LOG_JSON: ${LOG_JSON:-false}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-distributed_platform}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      REDIS_EVENTS_ENABLED: ${REDIS_EVENTS_ENABLED:-true}
+      EVENTS_CHANNEL: ${EVENTS_CHANNEL:-task_platform.events}
       OUTBOX_POLL_SECONDS: ${OUTBOX_POLL_SECONDS:-2}
       TASK_MAX_ATTEMPTS: ${TASK_MAX_ATTEMPTS:-3}
+      RETRY_BASE_SECONDS: ${RETRY_BASE_SECONDS:-1}
+      RETRY_BACKOFF_FACTOR: ${RETRY_BACKOFF_FACTOR:-2}
+      RETRY_MAX_DELAY_SECONDS: ${RETRY_MAX_DELAY_SECONDS:-300}
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,9 +87,17 @@ services:
     command: ["sh", "-c", "python -m app.worker.main"]
     environment:
       APP_ENV: dev
+      LOG_JSON: ${LOG_JSON:-false}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-distributed_platform}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      REDIS_EVENTS_ENABLED: ${REDIS_EVENTS_ENABLED:-true}
+      EVENTS_CHANNEL: ${EVENTS_CHANNEL:-task_platform.events}
       WORKER_ID: ${WORKER_ID:-worker-1}
+      WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-15}
+      WORKER_HEARTBEAT_TIMEOUT_SECONDS: ${WORKER_HEARTBEAT_TIMEOUT_SECONDS:-60}
+      TASK_LEASE_SECONDS: ${TASK_LEASE_SECONDS:-60}
+      RETRY_SCHEDULER_POLL_SECONDS: ${RETRY_SCHEDULER_POLL_SECONDS:-2}
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,9 +113,39 @@ services:
     networks:
       - platform
 
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - platform
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - platform
+
 volumes:
   pgdata:
   rabbitmqdata:
+  grafana_data:
 
 networks:
   platform:

@@ -16,6 +16,9 @@ class TaskCreate(BaseModel):
     priority: TaskPriority = "normal"
     max_attempts: int | None = Field(default=None, ge=1, le=10)
     idempotency_key: str | None = Field(default=None, max_length=255)
+    schedule_at: datetime | None = Field(
+        default=None, description="Запуск не раніше цього часу (UTC)"
+    )
 
 
 class AttemptInfo(BaseModel):

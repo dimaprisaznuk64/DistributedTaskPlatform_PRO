@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
 from app.models.attempt import TaskAttempt
 from app.models.task import Task
 from app.services.tasks import (
@@ -18,10 +19,60 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _record_execution_metrics(task: Task, attempt: TaskAttempt, outcome: str) -> None:
+    metrics.attempts_total.labels(outcome=outcome).inc()
+    if attempt.started_at is not None and attempt.finished_at is not None:
+        duration = (attempt.finished_at - attempt.started_at).total_seconds()
+        metrics.task_duration_seconds.labels(task_type=task.task_type).observe(duration)
+
+
 async def _still_running(session: AsyncSession, task: Task) -> bool:
     """Перевіряє у БД, що задача досі running (її могли скасувати в процесі)."""
     current = await session.scalar(select(Task.status).where(Task.id == task.id))
     return current == "running"
+
+
+async def try_acquire_lease(
+    session: AsyncSession,
+    task_id: int,
+    worker_id: str,
+    lease_seconds: float,
+) -> bool:
+    """Атомарно віддає задачу воркеру: status=queued і відсутній/прострочений lease."""
+    result = await session.execute(
+        update(Task)
+        .where(
+            Task.id == task_id,
+            Task.status == "queued",
+            or_(
+                Task.lease_owner.is_(None),
+                Task.lease_expires_at.is_(None),
+                Task.lease_expires_at < _now(),
+            ),
+        )
+        .values(
+            lease_owner=worker_id,
+            lease_expires_at=_now() + timedelta(seconds=lease_seconds),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
+async def renew_lease(
+    session: AsyncSession,
+    task_id: int,
+    worker_id: str,
+    lease_seconds: float,
+) -> bool:
+    """Подовжує lease задачі, поки її все ще виконує цей воркер."""
+    result = await session.execute(
+        update(Task)
+        .where(Task.id == task_id, Task.lease_owner == worker_id, Task.status == "running")
+        .values(lease_expires_at=_now() + timedelta(seconds=lease_seconds))
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
 
 
 async def start_attempt(session: AsyncSession, task: Task) -> TaskAttempt:
@@ -65,6 +116,7 @@ async def record_success(
     task.result = result
     task.finished_at = _now()
     await set_status(session, task, "success", event_type="task.succeeded")
+    _record_execution_metrics(task, attempt, "success")
 
 
 async def record_failure(
@@ -107,3 +159,4 @@ async def record_failure(
             event_type="task.dead_lettered" if retryable else "task.failed",
             metadata={"attempt_number": attempt.attempt_number, "error": error_truncated},
         )
+    _record_execution_metrics(task, attempt, task.status)

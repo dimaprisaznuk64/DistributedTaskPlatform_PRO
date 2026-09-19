@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: tasks-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: distributed-task-platform:0.5.0
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "python -m app.worker.main"]
+          envFrom:
+            - secretRef:
+                name: platform-credentials
+            - configMapRef:
+                name: platform-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

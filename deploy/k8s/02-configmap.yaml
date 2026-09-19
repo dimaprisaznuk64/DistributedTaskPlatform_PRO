@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+  namespace: tasks-platform
+data:
+  APP_ENV: prod
+  LOG_LEVEL: INFO
+  LOG_JSON: "false"
+  OUTBOX_POLL_SECONDS: "2"
+  TASK_MAX_ATTEMPTS: "3"
+  TASK_EXECUTION_TIMEOUT_SECONDS: "60"
+  RETRY_BASE_SECONDS: "1"
+  RETRY_BACKOFF_FACTOR: "2"
+  RETRY_MAX_DELAY_SECONDS: "300"
+  RETRY_SCHEDULER_POLL_SECONDS: "2"
+  WORKER_HEARTBEAT_SECONDS: "15"
+  WORKER_HEARTBEAT_TIMEOUT_SECONDS: "60"
+  TASK_LEASE_SECONDS: "60"
+  REDIS_EVENTS_ENABLED: "true"
+  EVENTS_CHANNEL: task_platform.events

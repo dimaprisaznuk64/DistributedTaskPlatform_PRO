@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 _connection: aio_pika.abc.AbstractRobustConnection | None = None
 
+PRIORITY_TO_RABBIT: dict[str, int] = {"critical": 9, "high": 6, "normal": 3, "low": 1}
+
+
+def _priority_value(payload: dict) -> int:
+    return PRIORITY_TO_RABBIT.get(payload.get("priority"), 3)
+
 
 async def get_connection() -> aio_pika.abc.AbstractRobustConnection:
     global _connection
@@ -55,6 +61,7 @@ async def publish_pending_events(limit: int = 200) -> int:
                             body=json.dumps(outbox.payload, default=str).encode(),
                             delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                             content_type="application/json",
+                            priority=_priority_value(outbox.payload),
                         ),
                         routing_key=outbox.routing_key,
                     )
