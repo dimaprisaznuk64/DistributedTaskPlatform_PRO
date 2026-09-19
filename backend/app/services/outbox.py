@@ -65,9 +65,7 @@ async def publish_pending_events(limit: int = 200) -> int:
                 except Exception as exc:
                     outbox.attempts += 1
                     outbox.last_error = str(exc)[:1000]
-                    logger.warning(
-                        "Публікація outbox #%s не вдалась: %s", outbox.id, exc
-                    )
+                    logger.warning("Публікація outbox #%s не вдалась: %s", outbox.id, exc)
             await session.commit()
         return len(events)
 

@@ -19,10 +19,16 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     outbox_poll_seconds: float = 2.0
     task_max_attempts: int = 3
+    task_execution_timeout_seconds: int = 60
+
+    retry_base_seconds: float = 1.0
+    retry_backoff_factor: float = 2.0
+    retry_max_delay_seconds: float = 300.0
+    retry_scheduler_poll_seconds: float = 2.0
+
     exchange_name: str = "tasks"
     routing_key_task_created: str = "task_created"
     worker_id: str = "worker-1"
-    task_execution_timeout_seconds: int = 60
 
 
 @lru_cache

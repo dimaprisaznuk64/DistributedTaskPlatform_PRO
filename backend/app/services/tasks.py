@@ -17,14 +17,16 @@ logger = logging.getLogger(__name__)
 VALID_TRANSITIONS: dict[str, set[str]] = {
     "created": {"queued", "cancelled"},
     "queued": {"running", "cancelled"},
-    "running": {"success", "failed", "cancelled"},
+    "running": {"success", "failed", "retry_scheduled", "cancelled", "dead_letter"},
+    "retry_scheduled": {"queued", "cancelled"},
     "failed": {"queued"},
     "cancelled": {"queued"},
+    "dead_letter": {"queued"},
 }
 
-TERMINAL = {"success", "failed", "cancelled", "dead_letter", "timeout"}
-CANCELABLE = {"created", "queued", "running"}
-RETRYABLE = {"failed", "cancelled"}
+TERMINAL = {"success", "failed", "cancelled", "dead_letter"}
+CANCELABLE = {"created", "queued", "running", "retry_scheduled"}
+RETRYABLE = {"failed", "cancelled", "dead_letter"}
 
 
 class InvalidTransitionError(Exception):
@@ -37,6 +39,12 @@ class TaskConflictError(Exception):
 
 def can_transition(old_status: str, new_status: str) -> bool:
     return new_status in VALID_TRANSITIONS.get(old_status, set())
+
+
+def compute_retry_delay_seconds(attempts: int) -> float:
+    """Експоненціальний backoff: base * factor^(attempts-1), обмежений максимумом."""
+    delay = settings.retry_base_seconds * (settings.retry_backoff_factor ** (attempts - 1))
+    return min(delay, settings.retry_max_delay_seconds)
 
 
 def _record_event(
@@ -76,6 +84,9 @@ async def set_status(
         task.finished_at = datetime.now(UTC)
     if new_status == "running" and task.started_at is None:
         task.started_at = datetime.now(UTC)
+    if new_status == "queued":
+        task.finished_at = None
+        task.scheduled_at = None
     _record_event(session, task, event_type, new_status, metadata)
     task.status = new_status
     await session.flush()
@@ -128,6 +139,12 @@ async def get_task(session: AsyncSession, task_id: int) -> Task | None:
     return result.scalar_one_or_none()
 
 
+async def get_by_idempotency_key(session: AsyncSession, key: str) -> Task | None:
+    stmt = select(Task).where(Task.idempotency_key == key)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def list_tasks(
     session: AsyncSession,
     *,
@@ -167,11 +184,7 @@ async def count_tasks(
 
 
 async def get_events(session: AsyncSession, task_id: int) -> list[TaskEvent]:
-    stmt = (
-        select(TaskEvent)
-        .where(TaskEvent.task_id == task_id)
-        .order_by(TaskEvent.id.asc())
-    )
+    stmt = select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.id.asc())
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

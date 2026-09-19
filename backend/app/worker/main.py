@@ -10,6 +10,7 @@ from app.worker.broker import consumer
 from app.worker.executors import registry
 from app.worker.executors.registry import UnknownTaskTypeError
 from app.worker.services import attempts as attempts_service
+from app.worker.services import scheduler as retry_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,7 @@ async def _dispatch(task_type: str, payload: dict) -> dict:
     handler = registry.get_handler(task_type)
     if handler is None:
         available = ", ".join(registry.registered_types())
-        raise UnknownTaskTypeError(
-            f"Невідомий тип задачі: {task_type!r}. Доступно: {available}"
-        )
+        raise UnknownTaskTypeError(f"Невідомий тип задачі: {task_type!r}. Доступно: {available}")
     return await handler.execute(payload)
 
 
@@ -55,10 +54,17 @@ async def handle_message(message) -> None:
                     task,
                     attempt,
                     f"Таймаут виконання ({settings.task_execution_timeout_seconds}с)",
+                    retryable=True,
+                )
+            except UnknownTaskTypeError as exc:
+                await attempts_service.record_failure(
+                    session, task, attempt, str(exc), retryable=False
                 )
             except Exception as exc:
                 logger.exception("Задача %s впала", task.id)
-                await attempts_service.record_failure(session, task, attempt, str(exc))
+                await attempts_service.record_failure(
+                    session, task, attempt, str(exc), retryable=True
+                )
             else:
                 await attempts_service.record_success(session, task, attempt, result)
 
@@ -78,7 +84,19 @@ async def run_worker() -> None:
         await handle_message(message)
 
 
-async def main() -> None:
+async def run_retry_scheduler() -> None:
+    logger.info("Retry-планувальник запущено (кожні %.1fс)", settings.retry_scheduler_poll_seconds)
+    while True:
+        try:
+            requeued = await retry_scheduler.requeue_due_tasks()
+            if requeued:
+                logger.info("Повернуто в чергу задач: %s", requeued)
+        except Exception:
+            logger.exception("Retry-планувальник: помилка тику")
+        await asyncio.sleep(settings.retry_scheduler_poll_seconds)
+
+
+async def _run_worker_with_reconnect() -> None:
     max_backoff = 10.0
     backoff = 1.0
     while True:
@@ -88,6 +106,10 @@ async def main() -> None:
             logger.exception("Зв'язок з RabbitMQ втрачено, повтор через %.1fс", backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, max_backoff)
+
+
+async def main() -> None:
+    await asyncio.gather(_run_worker_with_reconnect(), run_retry_scheduler())
 
 
 if __name__ == "__main__":

@@ -18,6 +18,8 @@ TASK_EVENT_TYPES = (
     "task.failed",
     "task.cancelled",
     "task.retried",
+    "task.retry_scheduled",
+    "task.dead_lettered",
 )
 
 
@@ -25,9 +27,7 @@ class TaskEvent(Base):
     __tablename__ = "task_events"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    task_id: Mapped[int] = mapped_column(
-        ForeignKey("tasks.id", ondelete="CASCADE"), index=True
-    )
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     old_status: Mapped[str | None] = mapped_column(String(20))
     new_status: Mapped[str] = mapped_column(String(20), nullable=False)

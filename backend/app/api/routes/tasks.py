@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +30,16 @@ def _conflict(detail: str) -> HTTPException:
 async def create_task(
     body: TaskCreate,
     session: AsyncSession = Depends(get_session),
-) -> CreateResult:
+) -> CreateResult | JSONResponse:
+    if body.idempotency_key is not None:
+        existing = await tasks_service.get_by_idempotency_key(session, body.idempotency_key)
+        if existing is not None:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content=CreateResult(task=TaskInfo.model_validate(existing)).model_dump(
+                    mode="json"
+                ),
+            )
     try:
         task = await tasks_service.create_task(
             session,

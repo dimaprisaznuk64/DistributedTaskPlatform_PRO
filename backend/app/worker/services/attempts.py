@@ -1,16 +1,27 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.attempt import TaskAttempt
 from app.models.task import Task
-from app.services.tasks import _record_event, set_status
+from app.services.tasks import (
+    _record_event,
+    compute_retry_delay_seconds,
+    set_status,
+)
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+async def _still_running(session: AsyncSession, task: Task) -> bool:
+    """Перевіряє у БД, що задача досі running (її могли скасувати в процесі)."""
+    current = await session.scalar(select(Task.status).where(Task.id == task.id))
+    return current == "running"
 
 
 async def start_attempt(session: AsyncSession, task: Task) -> TaskAttempt:
@@ -45,12 +56,15 @@ async def record_success(
     attempt: TaskAttempt,
     result: dict,
 ) -> None:
-    await set_status(session, task, "success", event_type="task.succeeded")
     attempt.status = "success"
     attempt.result = result
     attempt.finished_at = _now()
+    if not await _still_running(session, task):
+        await session.flush()
+        return
     task.result = result
     task.finished_at = _now()
+    await set_status(session, task, "success", event_type="task.succeeded")
 
 
 async def record_failure(
@@ -58,17 +72,38 @@ async def record_failure(
     task: Task,
     attempt: TaskAttempt,
     error: str,
+    *,
+    retryable: bool = True,
 ) -> None:
     error_truncated = error[:2000]
-    await set_status(
-        session,
-        task,
-        "failed",
-        event_type="task.failed",
-        metadata={"attempt_number": attempt.attempt_number, "error": error_truncated},
-    )
     attempt.status = "failed"
     attempt.error_message = error_truncated
     attempt.finished_at = _now()
+    if not await _still_running(session, task):
+        await session.flush()
+        return
     task.last_error = error_truncated
-    task.finished_at = _now()
+    if retryable and task.attempts < task.max_attempts:
+        backoff = compute_retry_delay_seconds(task.attempts)
+        scheduled = _now() + timedelta(seconds=backoff)
+        task.scheduled_at = scheduled
+        await set_status(
+            session,
+            task,
+            "retry_scheduled",
+            event_type="task.retry_scheduled",
+            metadata={
+                "attempt_number": attempt.attempt_number,
+                "backoff_seconds": backoff,
+                "retry_at": scheduled.isoformat(),
+            },
+        )
+    else:
+        new_status = "dead_letter" if retryable else "failed"
+        await set_status(
+            session,
+            task,
+            new_status,
+            event_type="task.dead_lettered" if retryable else "task.failed",
+            metadata={"attempt_number": attempt.attempt_number, "error": error_truncated},
+        )

@@ -28,15 +28,11 @@ class Task(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     task_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="created", index=True
-    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="created", index=True)
     priority: Mapped[str] = mapped_column(String(20), nullable=False, default="normal")
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    idempotency_key: Mapped[str | None] = mapped_column(
-        String(255), unique=True, index=True
-    )
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
