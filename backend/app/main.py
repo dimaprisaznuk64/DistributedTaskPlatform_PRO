@@ -17,6 +17,7 @@ from app.api.routes.metrics import router as metrics_router
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.metrics import PrometheusMiddleware
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.version import VERSION
 from app.db.redis import close_redis as close_redis_client
 from app.services import auth as auth_service
@@ -69,6 +70,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(PrometheusMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 
 @app.get("/", include_in_schema=False, response_class=HTMLResponse)

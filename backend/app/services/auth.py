@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import session_factory
+from app.models.refresh_token import RefreshToken
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,7 @@ def _create_token(subject: int, token_type: str, expires_delta: timedelta) -> st
     payload = {
         "sub": str(subject),
         "type": token_type,
+        "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": now + expires_delta,
     }
@@ -67,6 +70,50 @@ def decode_token(token: str) -> dict:
         settings.jwt_secret,
         algorithms=[settings.jwt_algorithm],
     )
+
+
+async def persist_refresh_token(
+    session: AsyncSession, user_id: int, payload: dict
+) -> RefreshToken:
+    """Зберігає refresh-токен у БД (поверхнево — фактично jti + exp з JWT)."""
+    jti = payload.get("jti")
+    if not jti:
+        raise ValueError("refresh-токен без jti")
+    token = RefreshToken(
+        user_id=user_id,
+        jti=jti,
+        expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC),
+    )
+    session.add(token)
+    return token
+
+
+async def _stored_refresh(session: AsyncSession, jti: str) -> RefreshToken | None:
+    return await session.scalar(
+        select(RefreshToken).where(RefreshToken.jti == jti).limit(1)
+    )
+
+
+def _utc_aware(dt: datetime | None) -> datetime | None:
+    if dt is None or dt.tzinfo is not None:
+        return dt
+    return dt.replace(tzinfo=UTC)
+
+
+async def refresh_is_valid(session: AsyncSession, payload: dict) -> RefreshToken | None:
+    """Перевіряє, що refresh-токен існує, не revoked і не прострочений."""
+    stored = await _stored_refresh(session, payload.get("jti", ""))
+    if stored is None:
+        return None
+    if stored.revoked_at is not None:
+        return None
+    if _utc_aware(stored.expires_at) <= datetime.now(UTC):
+        return None
+    return stored
+
+
+async def revoke_refresh(session: AsyncSession, stored: RefreshToken) -> None:
+    stored.revoked_at = datetime.now(UTC)
 
 
 async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:

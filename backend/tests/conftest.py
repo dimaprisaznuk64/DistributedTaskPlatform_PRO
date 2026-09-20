@@ -70,6 +70,10 @@ async def client(db: AsyncEngine) -> AsyncClient:
     db_session.session_factory = factory
     auth_service._login_window.clear()
 
+    import app.core.rate_limit as rate_limit
+
+    rate_limit.reset_rate_limits()
+
     async def _get_session():
         async with factory() as session:
             yield session

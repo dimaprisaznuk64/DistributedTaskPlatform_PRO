@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,11 +58,11 @@ async def login(
     if user is None or not auth.verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Невірний логін або пароль")
     user.last_login_at = datetime.now(UTC)
-    await session.commit()
-    access = auth.create_access_token(user.id)
     refresh = auth.create_refresh_token(user.id)
+    await auth.persist_refresh_token(session, user.id, auth.decode_token(refresh))
+    await session.commit()
     return TokenResponse(
-        access_token=access,
+        access_token=auth.create_access_token(user.id),
         refresh_token=refresh,
         user=_user_out(user),
     )
@@ -81,14 +81,44 @@ async def refresh(
         user_id = int(payload["sub"])
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Недійсний refresh-токен") from exc
+
+    stored = await auth.refresh_is_valid(session, payload)
+    if stored is None:
+        raise HTTPException(status_code=401, detail="Недійсний або відкликаний refresh-токен")
+
     user = await auth.get_user_by_id(session, user_id)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Користувача не знайдено")
+
+    # Ротація: старий токен анулюється, видається нова пара
+    await auth.revoke_refresh(session, stored)
+    new_refresh = auth.create_refresh_token(user.id)
+    await auth.persist_refresh_token(session, user.id, auth.decode_token(new_refresh))
+    await session.commit()
     return TokenResponse(
         access_token=auth.create_access_token(user.id),
-        refresh_token=body.refresh_token,
+        refresh_token=new_refresh,
         user=_user_out(user),
     )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def logout(
+    body: RefreshRequest,
+    _: None = Depends(auth.auth_rate_limiter),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    try:
+        payload = auth.decode_token(body.refresh_token)
+        if payload.get("type") != auth.TOKEN_TYPE_REFRESH:
+            raise jwt.InvalidTokenError
+    except (jwt.PyJWTError, KeyError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Недійсний refresh-токен") from exc
+    stored = await auth.refresh_is_valid(session, payload)
+    if stored is not None:
+        await auth.revoke_refresh(session, stored)
+        await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=UserOut)

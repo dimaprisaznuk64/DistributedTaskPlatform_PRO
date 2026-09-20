@@ -6,13 +6,13 @@ RabbitMQ, Redis, backend API (з init-container для міграцій) і во
 ## 1. Збірка образу
 
 ```bash
-docker build -t distributed-task-platform:1.1.0 ./backend
+docker build -t distributed-task-platform:1.2.0 ./backend
 ```
 
 У мінікубі образ підхоплюється з локального registry без публікації:
 
 ```bash
-minikube image load distributed-task-platform:1.1.0
+minikube image load distributed-task-platform:1.2.0
 ```
 
 У реальному кластері образ треба спершу запушити в registry і замінити
@@ -48,9 +48,19 @@ kubectl -n tasks-platform get hpa
 kubectl -n tasks-platform scale deployment worker --replicas=5   # ручний оверрайд
 ```
 
-HPA повертає кількість реплік до min після спаду навантаження. Для масштабування
-саме за глибиною черги підійде KEDA з RabbitMQ-тригером — це зовнішній компонент
-і тут не налаштований.
+Додатково в `09-keda-rabbitmq.yaml` — KEDA `ScaledObject` для воркера за глибиною
+черги RabbitMQ (`task_executions`, mode `QueueLength`, >10 повідомлень → масштабування
+до 10 реплік). Потрібен встановлений KEDA у кластері:
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace
+kubectl -n tasks-platform get scaledobject
+```
+
+HPA по CPU і KEDA-тригер співіснують: HPA відповідає за CPU-піки, KEDA — за
+натиск черги. Використовуй один (рекомендую KEDA), якщо поведінка дублюється.
+HPA повертає кількість реплік до min після спаду навантаження.
 
 ## 5. Креденшели
 

@@ -18,8 +18,8 @@ transactional outbox: подія записується в БД разом із 
 | **0.4** | Redis pub/sub як канал live-подій, WebSocket `/api/v1/ws/events`, операційний дашборд (статистика, воркери, live-стрічка), `GET /api/v1/stats`, RabbitMQ queue depth |
 | **0.5** | Prometheus `/metrics` + Grafana (provisioned dashboard), structured JSON-логи, HTTP-метрики, CI/CD (GitHub Actions), load/failure-тести |
 | **1.0** | Kubernetes-маніфести, HPA (worker/backend), посібник розгортання, консолідована версія 1.0.0, CORS через env, self-healing зниклих `queued`-задач, фінальна документація |
-| **1.1 (поточна)** | Auth: users, bcrypt, JWT access+refresh, ролі (admin/operator/viewer), RBAC на API/REST/WS, rate limiting, захищений дашборд |
-| **1.2 (план)** | Rate limiting для всього API (per-user), refresh token ротація з revoke/blacklist, KEDA + RabbitMQ-тригер для HPA |
+| **1.1** | Auth: users, bcrypt, JWT access+refresh, ролі (admin/operator/viewer), RBAC на API/REST/WS, rate limiting, захищений дашборд |
+| **1.2 (поточна)** | Rate limiting для всього API (per-user/per-IP, middleware `RateLimitMiddleware`), refresh token ротація з revoke (таблиця `refresh_tokens`, `/auth/logout`), KEDA + RabbitMQ-тригер для HPA воркера |
 
 ## Швидкий старт
 
@@ -44,7 +44,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
 **Верифікація середовища** (Python 3.13+):
 
 ```bash
-python -m pytest backend/tests -q       # 57 тестів: flow, retry, DLQ, scheduler, dashboard, load/failure, delivery semantics, auth
+python -m pytest backend/tests -q       # 60 тестів: flow, retry, DLQ, scheduler, dashboard, load/failure, delivery semantics, auth + rate/rotation
 python -m ruff check backend/app backend/tests backend/alembic
 docker compose config -q                # валідність compose-файлу
 curl http://localhost:8000/health       # {"status":"ok","database":true}
@@ -107,13 +107,17 @@ Worker помер (нема heartbeat) => Координатор мітить de
 > `Authorization: Bearer <access_token>`. Ролі: `admin` (усе + зміна ролей),
 > `operator` (створення/retry/cancel задач), `viewer` (читання). WS приймає токен
 > через query `?token=`. За замовчуванням створюється admin (`ADMIN_USERNAME`/`ADMIN_PASSWORD`).
-> Усі `/auth/*` обмежені rate limiter'ом (in-process, за IP).
+> Усі `/auth/*` обмежені rate limiter'ом (in-process, за IP), а весь API обмежений
+> окремим rate limiter'ом (per-user за access-токеном або per-IP для анонімних;
+> `API_RATE_LIMIT_MAX` запитів на `API_RATE_LIMIT_WINDOW_SECONDS`). Ліміти
+> in-process — для кількох реплік backend використовуй зовнішній компонент (напр. API gateway).
 
 | Метод | Шлях | Опис | Доступ |
 |---|---|---|---|
 | POST | `/api/v1/auth/register` | Реєстрація (роль `viewer`) | public (rate-limited) |
 | POST | `/api/v1/auth/login` | Логін → access + refresh токени | public (rate-limited) |
-| POST | `/api/v1/auth/refresh` | Обмін refresh → новий access | public (rate-limited) |
+| POST | `/api/v1/auth/refresh` | Обмін refresh → новий access + ротація refresh (старий анулюється) | public (rate-limited) |
+| POST | `/api/v1/auth/logout` | Відкликати refresh-токен (revoke) | public (rate-limited) |
 | GET | `/api/v1/auth/me` | Поточний користувач | авторизовані |
 | POST | `/api/v1/auth/users/{id}/role` | Зміна ролі користувача | admin |
 | POST | `/api/v1/tasks` | Створити задачу (поле `schedule_at` для відкладеного запуску; idempotent: повторний `idempotency_key` → 200 і та сама задача) | operator/admin |
@@ -152,7 +156,7 @@ backend з init-container для `alembic upgrade head`, воркер з HPA (CP
 і backend HPA (CPU 70%, 1–5 подів). Застосування:
 
 ```bash
-docker build -t distributed-task-platform:1.1.0 backend/   # minikube image load ...
+docker build -t distributed-task-platform:1.2.0 backend/   # minikube image load ...
 kubectl apply -k deploy/k8s
 kubectl -n tasks-platform rollout status deployment/worker
 kubectl -n tasks-platform port-forward svc/backend 8000:8000

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     auth_rate_limit_minutes: float = 1.0
     auth_rate_limit_max: int = 10
 
+    api_rate_limit_window_seconds: float = 60.0
+    api_rate_limit_max: int = 120
+
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/distributed_platform"
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     redis_url: str = "redis://localhost:6379/0"

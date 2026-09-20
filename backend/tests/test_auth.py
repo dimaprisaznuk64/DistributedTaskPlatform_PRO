@@ -90,6 +90,39 @@ async def test_refresh_rotates_access(client, session_factory) -> None:
     )
     assert refreshed.status_code == 200
     assert refreshed.json()["access_token"]
+    assert refreshed.json()["refresh_token"] != refresh_token
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_rotation_revokes_old(client, session_factory) -> None:
+    logged = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    refresh_token = logged.json()["refresh_token"]
+
+    first = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert first.status_code == 200
+    new_refresh = first.json()["refresh_token"]
+
+    reused = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert reused.status_code == 401
+
+    second = await client.post("/api/v1/auth/refresh", json={"refresh_token": new_refresh})
+    assert second.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_refresh(client, session_factory) -> None:
+    logged = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    refresh_token = logged.json()["refresh_token"]
+
+    logout = await client.post("/api/v1/auth/logout", json={"refresh_token": refresh_token})
+    assert logout.status_code == 204
+
+    reused = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert reused.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -177,6 +210,21 @@ async def test_operator_cannot_change_roles(client, session_factory) -> None:
 async def test_invalid_token_rejected(client, session_factory) -> None:
     response = await client.get("/api/v1/stats", headers=_auth("not-a-jwt"))
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_api_rate_limit_returns_429(client, session_factory, monkeypatch) -> None:
+    import app.core.rate_limit as rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "api_rate_limit_max", 2)
+    monkeypatch.setattr(rate_limit.settings, "api_rate_limit_window_seconds", 60.0)
+    rate_limit.reset_rate_limits()
+
+    for _ in range(2):
+        response = await client.get("/api/v1/tasks")
+        assert response.status_code == 200
+    limited = await client.get("/api/v1/tasks")
+    assert limited.status_code == 429
 
 
 @pytest.mark.asyncio
