@@ -17,8 +17,12 @@
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--bad); }
   .dot.online { background: var(--ok); }
   main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; }
-  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  section {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+  }
   section h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .btn { background: var(--accent); color: #04121f; border: 0; border-radius: 6px; padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn:hover { filter: brightness(1.15); }
   .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
   .card .n { font-size: 26px; font-weight: 700; }
@@ -104,6 +108,13 @@
     </table>
   </section>
   <section class="full">
+    <h2>Dead letter (DLQ)</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Тип</th><th>Спроби</th><th>Пов. спроб</th><th>Наступний retry</th><th>Помилка</th><th></th></tr></thead>
+      <tbody id="dlq"></tbody>
+    </table>
+  </section>
+  <section class="full">
     <h2>Live-події</h2>
     <div class="log" id="log"></div>
   </section>
@@ -155,6 +166,26 @@ function refreshTasks(items) {
      <td>${badge("st", task.status)}</td><td>${task.attempts}</td></tr>`
   ).join("") || `<tr><td colspan="5" style="color:var(--muted)">Задач немає</td></tr>`;
 }
+function refreshDlq(items) {
+  $("dlq").innerHTML = items.map(task =>
+    `<tr><td>${task.id}</td><td>${task.task_type}</td>
+     <td>${task.attempts}</td><td>${task.dlq_requeue_count ?? 0}</td>
+     <td>${task.dlq_retry_at ? new Date(task.dlq_retry_at).toLocaleString() : "—"}</td>
+     <td style="color:var(--bad);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(task.last_error || "").replace(/"/g, "&quot;")}">${task.last_error || ""}</td>
+     <td><button class="btn" data-retry="${task.id}">Повторити</button></td></tr>`
+  ).join("") || `<tr><td colspan="7" style="color:var(--muted)">Dead letter задач немає</td></tr>`;
+  $("dlq").querySelectorAll("[data-retry]").forEach(btn => {
+    btn.addEventListener("click", () => retryDlq(Number(btn.dataset.retry), btn));
+  });
+}
+async function retryDlq(taskId, btn) {
+  btn.disabled = true;
+  btn.textContent = "...";
+  try {
+    await api(`/api/v1/tasks/${taskId}/retry`, { method: "POST" });
+  } catch (e) { /* 401 handled in api() */ }
+  load();
+}
 function pushLog(frame) {
   const el = document.createElement("div");
   const label = TYPE_LABELS[frame.type] || frame.type;
@@ -201,14 +232,16 @@ function debounceRefresh() {
   refreshTimer = setTimeout(load, 300);
 }
 async function load() {
-  const [stats, workers, tasks] = await Promise.all([
+  const [stats, workers, tasks, dlq] = await Promise.all([
     api("/api/v1/stats").then(r => r.json()),
     api("/api/v1/workers").then(r => r.json()),
     api("/api/v1/tasks?limit=10").then(r => r.json()),
+    api("/api/v1/tasks?status=dead_letter&limit=50").then(r => r.json()),
   ]);
   refreshStats(stats);
   refreshWorkers(workers);
   refreshTasks(tasks.items);
+  refreshDlq(dlq.items);
 }
 async function handleLogin(event) {
   event.preventDefault();

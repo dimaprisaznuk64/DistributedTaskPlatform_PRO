@@ -61,6 +61,8 @@ class TaskInfo(BaseModel):
     result: dict[str, Any] | None
     last_error: str | None
     created_by: int | None
+    dlq_requeue_count: int = 0
+    dlq_retry_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
