@@ -19,6 +19,7 @@ transactional outbox: подія записується в БД разом із 
 | **0.5** | Prometheus `/metrics` + Grafana (provisioned dashboard), structured JSON-логи, HTTP-метрики, CI/CD (GitHub Actions), load/failure-тести |
 | **1.0** | Kubernetes-маніфести, HPA (worker/backend), посібник розгортання, консолідована версія 1.0.0, CORS через env, self-healing зниклих `queued`-задач, фінальна документація |
 | **1.1 (поточна)** | Auth: users, bcrypt, JWT access+refresh, ролі (admin/operator/viewer), RBAC на API/REST/WS, rate limiting, захищений дашборд |
+| **1.2 (план)** | Rate limiting для всього API (per-user), refresh token ротація з revoke/blacklist, KEDA + RabbitMQ-тригер для HPA |
 
 ## Швидкий старт
 
@@ -43,7 +44,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
 **Верифікація середовища** (Python 3.13+):
 
 ```bash
-python -m pytest backend/tests -q       # 36 тестів: flow, retry, DLQ, scheduler, dashboard, load/failure
+python -m pytest backend/tests -q       # 57 тестів: flow, retry, DLQ, scheduler, dashboard, load/failure, delivery semantics, auth
 python -m ruff check backend/app backend/tests backend/alembic
 docker compose config -q                # валідність compose-файлу
 curl http://localhost:8000/health       # {"status":"ok","database":true}
