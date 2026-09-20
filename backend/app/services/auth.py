@@ -116,6 +116,19 @@ async def revoke_refresh(session: AsyncSession, stored: RefreshToken) -> None:
     stored.revoked_at = datetime.now(UTC)
 
 
+async def revoke_all_refresh_tokens(session: AsyncSession, user_id: int) -> int:
+    """Анулює всі активні refresh-токени користувача (зміна пароля, деактивація)."""
+    from sqlalchemy import update
+
+    result = await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(UTC))
+        .execution_options(synchronize_session="fetch")
+    )
+    return int(result.rowcount or 0)
+
+
 async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
     return await session.get(User, user_id)
 

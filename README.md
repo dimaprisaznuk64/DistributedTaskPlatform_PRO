@@ -19,7 +19,7 @@ transactional outbox: подія записується в БД разом із 
 | **0.5** | Prometheus `/metrics` + Grafana (provisioned dashboard), structured JSON-логи, HTTP-метрики, CI/CD (GitHub Actions), load/failure-тести |
 | **1.0** | Kubernetes-маніфести, HPA (worker/backend), посібник розгортання, консолідована версія 1.0.0, CORS через env, self-healing зниклих `queued`-задач, фінальна документація |
 | **1.1** | Auth: users, bcrypt, JWT access+refresh, ролі (admin/operator/viewer), RBAC на API/REST/WS, rate limiting, захищений дашборд |
-| **1.2 (поточна)** | Rate limiting для всього API (per-user/per-IP, middleware `RateLimitMiddleware`), refresh token ротація з revoke (таблиця `refresh_tokens`, `/auth/logout`), KEDA + RabbitMQ-тригер для HPA воркера |
+| **1.2 (поточна)** | Rate limiting для всього API (per-user/per-IP, middleware `RateLimitMiddleware`), refresh token ротація з revoke (таблиця `refresh_tokens`, `/auth/logout`), зміна пароля і деактивація з revoke всіх refresh-токенів, KEDA + RabbitMQ-тригер для HPA воркера |
 
 ## Швидкий старт
 
@@ -44,7 +44,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
 **Верифікація середовища** (Python 3.13+):
 
 ```bash
-python -m pytest backend/tests -q       # 60 тестів: flow, retry, DLQ, scheduler, dashboard, load/failure, delivery semantics, auth + rate/rotation
+python -m pytest backend/tests -q       # 64 тести: flow, retry, DLQ, scheduler, dashboard, load/failure, delivery semantics, auth + rate/rotation/password-rotation
 python -m ruff check backend/app backend/tests backend/alembic
 docker compose config -q                # валідність compose-файлу
 curl http://localhost:8000/health       # {"status":"ok","database":true}
@@ -118,8 +118,10 @@ Worker помер (нема heartbeat) => Координатор мітить de
 | POST | `/api/v1/auth/login` | Логін → access + refresh токени | public (rate-limited) |
 | POST | `/api/v1/auth/refresh` | Обмін refresh → новий access + ротація refresh (старий анулюється) | public (rate-limited) |
 | POST | `/api/v1/auth/logout` | Відкликати refresh-токен (revoke) | public (rate-limited) |
+| POST | `/api/v1/auth/change-password` | Зміна пароля → revoke всіх refresh-токенів користувача | авторизовані |
 | GET | `/api/v1/auth/me` | Поточний користувач | авторизовані |
 | POST | `/api/v1/auth/users/{id}/role` | Зміна ролі користувача | admin |
+| POST | `/api/v1/auth/users/{id}/active` | Активувати/деактивувати (`is_active`); деактивація revoke всіх refresh-токенів | admin |
 | POST | `/api/v1/tasks` | Створити задачу (поле `schedule_at` для відкладеного запуску; idempotent: повторний `idempotency_key` → 200 і та сама задача) | operator/admin |
 | GET | `/api/v1/tasks` | Список + фільтри `status`, `task_type`, `priority` | авторизовані |
 | GET | `/api/v1/tasks/{id}` | Деталі: спроби, історія подій | авторизовані |

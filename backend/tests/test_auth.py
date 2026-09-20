@@ -126,6 +126,101 @@ async def test_logout_revokes_refresh(client, session_factory) -> None:
 
 
 @pytest.mark.asyncio
+async def test_change_password_revokes_all_refresh(client, session_factory) -> None:
+    logged = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    access = logged.json()["access_token"]
+    first_refresh = logged.json()["refresh_token"]
+
+    second = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    second_refresh = second.json()["refresh_token"]
+
+    changed = await client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "admin", "new_password": "new-strong-pass-456"},
+        headers=_auth(access),
+    )
+    assert changed.status_code == 200
+
+    for old in (first_refresh, second_refresh):
+        reused = await client.post("/api/v1/auth/refresh", json={"refresh_token": old})
+        assert reused.status_code == 401
+
+    with_new = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "new-strong-pass-456"},
+    )
+    assert with_new.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_change_password_wrong_current(client, session_factory) -> None:
+    logged = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    access = logged.json()["access_token"]
+    changed = await client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "wrong", "new_password": "new-strong-pass-456"},
+        headers=_auth(access),
+    )
+    assert changed.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_change_password_requires_auth(client, session_factory) -> None:
+    admin_token = client.headers["Authorization"]
+    client.headers.pop("Authorization")
+    try:
+        response = await client.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "admin", "new_password": "new-strong-pass-456"},
+        )
+        assert response.status_code == 401
+    finally:
+        client.headers["Authorization"] = admin_token
+
+
+@pytest.mark.asyncio
+async def test_deactivation_revokes_all_refresh(client, session_factory) -> None:
+    await client.post(
+        "/api/v1/auth/register",
+        json={"username": "shutdown", "password": "strong-pass-123"},
+    )
+    logged = await client.post(
+        "/api/v1/auth/login", json={"username": "shutdown", "password": "strong-pass-123"}
+    )
+    refresh1 = logged.json()["refresh_token"]
+
+    second = await client.post(
+        "/api/v1/auth/login", json={"username": "shutdown", "password": "strong-pass-123"}
+    )
+    refresh2 = second.json()["refresh_token"]
+
+    async with session_factory() as session:
+        target = await session.scalar(select(User).where(User.username == "shutdown"))
+        target_id = target.id
+
+    deactivated = await client.post(
+        f"/api/v1/auth/users/{target_id}/active", json={"is_active": False}
+    )
+    assert deactivated.status_code == 200
+    assert deactivated.json()["is_active"] is False
+
+    for old in (refresh1, refresh2):
+        reused = await client.post("/api/v1/auth/refresh", json={"refresh_token": old})
+        assert reused.status_code == 401
+
+    relogin = await client.post(
+        "/api/v1/auth/login", json={"username": "shutdown", "password": "strong-pass-123"}
+    )
+    assert relogin.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_access_token_cannot_be_used_as_refresh(client, session_factory) -> None:
     logged = await client.post(
         "/api/v1/auth/login", json={"username": "admin", "password": "admin"}

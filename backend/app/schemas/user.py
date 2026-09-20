@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     role: str
+    is_active: bool = True
     created_at: datetime
     last_login_at: datetime | None = None
     model_config = {"from_attributes": True}
@@ -39,3 +40,12 @@ class TokenResponse(BaseModel):
 
 class RoleChangeRequest(BaseModel):
     role: str = Field(pattern="|".join(ROLES))
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class UserToggleActiveRequest(BaseModel):
+    is_active: bool

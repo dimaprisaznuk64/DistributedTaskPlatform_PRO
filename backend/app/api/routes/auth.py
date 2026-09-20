@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 import jwt
@@ -10,14 +11,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_session
 from app.models.user import User
 from app.schemas.user import (
+    ChangePasswordRequest,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
     RoleChangeRequest,
     TokenResponse,
     UserOut,
+    UserToggleActiveRequest,
 )
 from app.services import auth
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -124,6 +129,48 @@ async def logout(
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(auth.get_current_user)) -> UserOut:
     return _user_out(user)
+
+
+@router.post("/change-password", response_model=UserOut)
+async def change_password(
+    body: ChangePasswordRequest,
+    current: User = Depends(auth.get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserOut:
+    user = await session.get(User, current.id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Користувача не знайдено")
+    if not auth.verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Поточний пароль неправильний")
+    if body.current_password == body.new_password:
+        raise HTTPException(status_code=400, detail="Новий пароль збігається з поточним")
+    user.password_hash = auth.hash_password(body.new_password)
+    revoked = await auth.revoke_all_refresh_tokens(session, user.id)
+    await session.commit()
+    await session.refresh(user)
+    logger.info("Змінено пароль користувача %s, відкликано refresh: %s", user.username, revoked)
+    return _user_out(user)
+
+
+@router.post("/users/{user_id}/active", response_model=UserOut)
+async def set_active(
+    user_id: int,
+    body: UserToggleActiveRequest,
+    admin: User = Depends(auth.require_roles("admin")),
+    session: AsyncSession = Depends(get_session),
+) -> UserOut:
+    target = await session.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Користувача не знайдено")
+    target.is_active = body.is_active
+    if not body.is_active:
+        revoked = await auth.revoke_all_refresh_tokens(session, target.id)
+        logger.info(
+            "Деактивовано користувача %s, відкликано refresh: %s", target.username, revoked
+        )
+    await session.commit()
+    await session.refresh(target)
+    return _user_out(target)
 
 
 @router.post("/users/{user_id}/role", response_model=UserOut)
