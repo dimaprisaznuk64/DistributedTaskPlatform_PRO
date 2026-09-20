@@ -323,6 +323,21 @@ async def test_api_rate_limit_returns_429(client, session_factory, monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_task_create_ip_limit_returns_429(client, session_factory, monkeypatch) -> None:
+    import app.core.rate_limit as rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "task_create_limit_max", 2)
+    monkeypatch.setattr(rate_limit.settings, "task_create_limit_window_seconds", 60.0)
+    rate_limit.reset_rate_limits()
+
+    for _ in range(2):
+        response = await client.post("/api/v1/tasks", json={"task_type": "echo"})
+        assert response.status_code == 201
+    limited = await client.post("/api/v1/tasks", json={"task_type": "echo"})
+    assert limited.status_code == 429
+
+
+@pytest.mark.asyncio
 async def test_deactivated_user_rejected(client, session_factory) -> None:
     await client.post(
         "/api/v1/auth/register",

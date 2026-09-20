@@ -46,7 +46,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
 **Верифікація середовища** (Python 3.13+):
 
 ```bash
-python -m pytest backend/tests -q       # 66 тестів: flow, retry, DLQ, scheduler, dashboard, load/failure, delivery semantics, auth + rate/rotation/password-rotation
+python -m pytest backend/tests -q       # 68 тестів: flow, retry, DLQ, scheduler, dashboard, load/failure, delivery semantics, auth + rate/rotation/password-rotation
 python -m ruff check backend/app backend/tests backend/alembic
 docker compose config -q                # валідність compose-файлу
 curl http://localhost:8000/health       # {"status":"ok","database":true}
@@ -117,6 +117,8 @@ Worker помер (нема heartbeat) => Координатор мітить de
 > **розподілений**: sliding window тримається в Redis (Lua-скрипт), тому спільний
 > для всіх реплік backend; при недоступності Redis автоматично вмикається
 > локальний in-process фолбек (`RATE_LIMIT_REDIS_ENABLED=false` вимикає Redis).
+> Створення задач додатково обмежене за IP (`TASK_CREATE_LIMIT_MAX` запитів на
+> `TASK_CREATE_LIMIT_WINDOW_SECONDS`).
 
 | Метод | Шлях | Опис | Доступ |
 |---|---|---|---|

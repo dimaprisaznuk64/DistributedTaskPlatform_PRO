@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,10 +37,16 @@ def _conflict(detail: str) -> HTTPException:
 
 @router.post("", response_model=CreateResult, status_code=status.HTTP_201_CREATED)
 async def create_task(
+    request: Request,
     body: TaskCreate,
     _: User = Depends(OPERATOR),
     session: AsyncSession = Depends(get_session),
 ) -> CreateResult | JSONResponse:
+    from app.core.rate_limit import task_create_allowed
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not await task_create_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Забагато створених задач, спробуйте пізніше")
     if body.idempotency_key is not None:
         existing = await tasks_service.get_by_idempotency_key(session, body.idempotency_key)
         if existing is not None:

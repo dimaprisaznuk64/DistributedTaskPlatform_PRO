@@ -147,6 +147,16 @@ async def ws_allowed(key: str) -> bool:
     return await limiter.allow(f"ws:{key}")
 
 
+async def task_create_allowed(client_ip: str) -> bool:
+    """Ліміт створення задач за IP (Redis, фолбек локальний)."""
+    cfg_key = (settings.task_create_limit_max, settings.task_create_limit_window_seconds)
+    limiter = _rate_limiters.get(cfg_key)
+    if limiter is None:
+        limiter = RateLimiter(*cfg_key)
+        _rate_limiters[cfg_key] = limiter
+    return await limiter.allow(f"create:{client_ip}")
+
+
 def _client_key(scope: dict) -> str:
     """Повертає ключ ліміту: user id з access-токена або IP клієнта."""
     headers = scope.get("headers", [])
