@@ -21,7 +21,7 @@ transactional outbox: подія записується в БД разом із 
 | **1.1** | Auth: users, bcrypt, JWT access+refresh, ролі (admin/operator/viewer), RBAC на API/REST/WS, rate limiting, захищений дашборд |
 | **1.2** | Rate limiting для всього API (per-user/per-IP, middleware `RateLimitMiddleware`), refresh token ротація з revoke (таблиця `refresh_tokens`, `/auth/logout`), зміна пароля і деактивація з revoke всіх refresh-токенів, KEDA + RabbitMQ-тригер для HPA воркера |
 | **1.3** | Розподілений rate limiter у Redis (Lua sliding window, спільний для всіх реплік) з фолбеком на in-process локальний при недоступності Redis; автоматичний DLQ-retry за розкладом (dead-letter задачі повертаються в чергу до `DLQ_RETRY_MAX_CYCLES` циклів з інтервалом `DLQ_RETRY_INTERVAL_SECONDS`, далі лишаються terminal) |
-| **1.4 (поточна)** | DLQ-моніторинг у дашборді (панель dead letter + ручний retry), refresh-токен-ліміт для WS, IP-ліміт повторного створення, CI-пайплайн |
+| **1.4 (поточна)** | DLQ-моніторинг у дашборді (панель dead letter + ручний retry), refresh-токен-ліміт для WS, IP-ліміт повторного створення, CI-пайплайн (GitHub Actions: ruff + 68 тестів + compose-валідація) |
 
 ## Швидкий старт
 
