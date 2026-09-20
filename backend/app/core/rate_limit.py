@@ -137,6 +137,16 @@ def reset_rate_limits() -> None:
         limiter.reset()
 
 
+async def ws_allowed(key: str) -> bool:
+    """Ліміт WebSocket-підключень (Redis, фолбек локальний): per-user або per-IP."""
+    cfg_key = (settings.ws_connect_limit_max, settings.ws_connect_limit_window_seconds)
+    limiter = _rate_limiters.get(cfg_key)
+    if limiter is None:
+        limiter = RateLimiter(*cfg_key)
+        _rate_limiters[cfg_key] = limiter
+    return await limiter.allow(f"ws:{key}")
+
+
 def _client_key(scope: dict) -> str:
     """Повертає ключ ліміту: user id з access-токена або IP клієнта."""
     headers = scope.get("headers", [])

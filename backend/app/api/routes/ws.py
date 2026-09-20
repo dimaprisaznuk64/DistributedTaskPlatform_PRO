@@ -13,18 +13,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ws", tags=["ws"])
 
 
-async def _authenticate_ws(websocket: WebSocket, token: str) -> bool:
+async def _authenticate_ws(websocket: WebSocket, token: str) -> int | None:
+    """Повертає user_id або None при провалі аутентифікації."""
     try:
         payload = auth_service.decode_token(token)
         if payload.get("type") != auth_service.TOKEN_TYPE_ACCESS:
-            return False
+            return None
         from app.db.session import session_factory
 
         async with session_factory() as session:
             user = await auth_service.get_user_by_id(session, int(payload["sub"]))
-            return user is not None and user.is_active
+            if user is None or not user.is_active:
+                return None
+            return user.id
     except Exception:
-        return False
+        return None
 
 
 @router.websocket("/events")
@@ -33,9 +36,17 @@ async def ws_events(
     token: str = Query(default=""),
 ) -> None:
     """Live-стрічка подій: проксіює Redis pub/sub на дашборд (access-токен у query)."""
-    if not await _authenticate_ws(websocket, token):
+    user_id = await _authenticate_ws(websocket, token)
+    if user_id is None:
         await websocket.close(code=4401)
         return
+
+    from app.core.rate_limit import ws_allowed
+
+    if not await ws_allowed(str(user_id)):
+        await websocket.close(code=4429)
+        return
+
     await websocket.accept()
     try:
         async for frame in events_service.event_stream():

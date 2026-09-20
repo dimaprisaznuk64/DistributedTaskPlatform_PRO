@@ -130,3 +130,34 @@ async def test_ws_stream_forwards_frames(client, monkeypatch) -> None:
     ) as ws:
         assert ws.receive_text() == frames[0]
         assert ws.receive_text() == frames[1]
+
+
+@pytest.mark.asyncio
+async def test_ws_connection_limit_returns_4429(client, monkeypatch) -> None:
+    import app.core.rate_limit as rate_limit
+
+    async def fake_stream():
+        for _ in range(2):
+            yield "{}"
+
+    monkeypatch.setattr(ws_route.events_service, "event_stream", fake_stream)
+    monkeypatch.setattr(rate_limit.settings, "ws_connect_limit_max", 2)
+    monkeypatch.setattr(rate_limit.settings, "ws_connect_limit_window_seconds", 60.0)
+    rate_limit.reset_rate_limits()
+
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    from app.services import auth as auth_service
+
+    token = auth_service.create_access_token(1)
+    with TestClient(app) as tc:
+        with tc.websocket_connect(f"/api/v1/ws/events?token={token}"):
+            pass
+        with tc.websocket_connect(f"/api/v1/ws/events?token={token}"):
+            pass
+        with pytest.raises(WebSocketDisconnect) as exc_info, tc.websocket_connect(
+            f"/api/v1/ws/events?token={token}"
+        ):
+            pass
+        assert exc_info.value.code == 4429

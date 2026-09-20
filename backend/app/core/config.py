@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     events_channel: str = "task_platform.events"
     rate_limit_redis_enabled: bool = True
 
+    ws_connect_limit_max: int = 20
+    ws_connect_limit_window_seconds: float = 60.0
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
