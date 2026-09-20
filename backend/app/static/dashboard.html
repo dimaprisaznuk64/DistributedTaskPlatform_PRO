@@ -256,7 +256,9 @@ async function handleLogin(event) {
     body,
   });
   if (!response.ok) {
-    $("loginErr").textContent = "Невірний логін або пароль";
+    let detail = "Невірний логін або пароль";
+    try { const e = await response.json(); if (e.detail) detail = e.detail; } catch {}
+    $("loginErr").textContent = detail;
     return;
   }
   const data = await response.json();
