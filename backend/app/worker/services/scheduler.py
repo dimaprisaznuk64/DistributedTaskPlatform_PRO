@@ -127,6 +127,67 @@ async def requeue_due_tasks(limit: int = 200) -> int:
     return count
 
 
+async def requeue_dlq_tasks(limit: int = 200) -> int:
+    """Повертає в чергу задачі з DLQ, чий час повторної спроби настав.
+
+    Dead-letter задачі не лежать назавжди: кожна отримує до
+    dlq_retry_max_cycles повторних циклів з інтервалом dlq_retry_interval_seconds;
+    після вичерпання циклів лишається в terminal dead_letter.
+    """
+    if not settings.dlq_retry_enabled:
+        return 0
+    now = datetime.now(UTC)
+    count = 0
+    async with session_factory() as session:
+        result = await session.execute(
+            _lock(
+                select(Task)
+                .where(
+                    Task.status == "dead_letter",
+                    Task.dlq_retry_at.is_not(None),
+                    Task.dlq_retry_at <= now,
+                    Task.dlq_requeue_count < settings.dlq_retry_max_cycles,
+                )
+                .order_by(Task.dlq_retry_at.asc())
+                .limit(limit),
+                session,
+            )
+        )
+        due = list(result.scalars().all())
+        for task in due:
+            task.dlq_requeue_count += 1
+            await tasks_service.set_status(
+                session,
+                task,
+                "queued",
+                event_type="task.dlq_requeued",
+                metadata={
+                    "dlq_requeue_count": task.dlq_requeue_count,
+                    "max_cycles": settings.dlq_retry_max_cycles,
+                },
+            )
+            session.add(
+                OutboxEvent(
+                    routing_key=settings.routing_key_task_created,
+                    payload={
+                        "task_id": task.id,
+                        "task_type": task.task_type,
+                        "payload": task.payload,
+                        "priority": task.priority,
+                        "reattempt": True,
+                    },
+                )
+            )
+            count += 1
+        await session.commit()
+    if count:
+        metrics.retries_total.inc(count)
+        logger.info("З DLQ у чергу повернуто: %s", count)
+    for task in due:
+        events_service.schedule_task_event("task.updated", task)
+    return count
+
+
 async def recover_stuck_tasks(limit: int = 50) -> int:
     """Мітить мертвих воркерів і повертає в чергу задачі з простроченим lease."""
     now = datetime.now(UTC)

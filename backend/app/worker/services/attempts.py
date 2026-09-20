@@ -6,6 +6,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import metrics
+from app.core.config import settings
 from app.models.attempt import TaskAttempt
 from app.models.task import Task
 from app.services.tasks import (
@@ -159,4 +160,12 @@ async def record_failure(
             event_type="task.dead_lettered" if retryable else "task.failed",
             metadata={"attempt_number": attempt.attempt_number, "error": error_truncated},
         )
+        if (
+            retryable
+            and settings.dlq_retry_enabled
+            and task.dlq_requeue_count < settings.dlq_retry_max_cycles
+        ):
+            task.dlq_retry_at = _now() + timedelta(seconds=settings.dlq_retry_interval_seconds)
+        elif retryable:
+            task.dlq_retry_at = None
     _record_execution_metrics(task, attempt, task.status)

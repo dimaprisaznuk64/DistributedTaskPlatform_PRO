@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     retry_max_delay_seconds: float = 300.0
     retry_scheduler_poll_seconds: float = 2.0
 
+    dlq_retry_enabled: bool = True
+    dlq_retry_interval_seconds: float = 300.0
+    dlq_retry_max_cycles: int = 3
+
     worker_id: str = "worker-1"
     worker_heartbeat_seconds: float = 15.0
     worker_heartbeat_timeout_seconds: float = 60.0

@@ -22,6 +22,7 @@ TASK_EVENT_TYPES = (
     "task.retry_scheduled",
     "task.requeued",
     "task.dead_lettered",
+    "task.dlq_requeued",
 )
 
 

@@ -44,6 +44,8 @@ class Task(Base, TimestampMixin):
     result: Mapped[dict | None] = mapped_column(JSON)
     last_error: Mapped[str | None] = mapped_column(String(2000))
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dlq_requeue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dlq_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     attempts_: Mapped[list[TaskAttempt]] = relationship(  # noqa: F821
         "TaskAttempt",

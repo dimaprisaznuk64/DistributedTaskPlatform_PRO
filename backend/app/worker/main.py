@@ -160,12 +160,14 @@ async def run_coordinator() -> None:
             requeued = await coordinator.requeue_due_tasks()
             recovered = await coordinator.recover_stuck_tasks()
             orphaned = await coordinator.requeue_orphaned_queued_tasks()
-            if requeued or recovered or orphaned:
+            dlq_requeued = await coordinator.requeue_dlq_tasks()
+            if requeued or recovered or orphaned or dlq_requeued:
                 logger.info(
-                    "У чергу повернуто: %s, відновлено: %s, orphan-перепубліковано: %s",
+                    "У чергу повернуто: %s, відновлено: %s, orphan-перепубліковано: %s, з DLQ: %s",
                     requeued,
                     recovered,
                     orphaned,
+                    dlq_requeued,
                 )
         except Exception:
             logger.exception("Координатор: помилка тику")
