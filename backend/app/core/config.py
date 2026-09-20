@@ -57,6 +57,7 @@ class Settings(BaseSettings):
 
     redis_events_enabled: bool = True
     events_channel: str = "task_platform.events"
+    rate_limit_redis_enabled: bool = True
 
     @property
     def cors_origins_list(self) -> list[str]:

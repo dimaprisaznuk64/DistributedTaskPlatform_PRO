@@ -19,7 +19,8 @@ transactional outbox: подія записується в БД разом із 
 | **0.5** | Prometheus `/metrics` + Grafana (provisioned dashboard), structured JSON-логи, HTTP-метрики, CI/CD (GitHub Actions), load/failure-тести |
 | **1.0** | Kubernetes-маніфести, HPA (worker/backend), посібник розгортання, консолідована версія 1.0.0, CORS через env, self-healing зниклих `queued`-задач, фінальна документація |
 | **1.1** | Auth: users, bcrypt, JWT access+refresh, ролі (admin/operator/viewer), RBAC на API/REST/WS, rate limiting, захищений дашборд |
-| **1.2 (поточна)** | Rate limiting для всього API (per-user/per-IP, middleware `RateLimitMiddleware`), refresh token ротація з revoke (таблиця `refresh_tokens`, `/auth/logout`), зміна пароля і деактивація з revoke всіх refresh-токенів, KEDA + RabbitMQ-тригер для HPA воркера |
+| **1.2** | Rate limiting для всього API (per-user/per-IP, middleware `RateLimitMiddleware`), refresh token ротація з revoke (таблиця `refresh_tokens`, `/auth/logout`), зміна пароля і деактивація з revoke всіх refresh-токенів, KEDA + RabbitMQ-тригер для HPA воркера |
+| **1.3 (поточна)** | Розподілений rate limiter у Redis (Lua sliding window, спільний для всіх реплік) з фолбеком на in-process локальний при недоступності Redis |
 
 ## Швидкий старт
 
@@ -109,8 +110,10 @@ Worker помер (нема heartbeat) => Координатор мітить de
 > через query `?token=`. За замовчуванням створюється admin (`ADMIN_USERNAME`/`ADMIN_PASSWORD`).
 > Усі `/auth/*` обмежені rate limiter'ом (in-process, за IP), а весь API обмежений
 > окремим rate limiter'ом (per-user за access-токеном або per-IP для анонімних;
-> `API_RATE_LIMIT_MAX` запитів на `API_RATE_LIMIT_WINDOW_SECONDS`). Ліміти
-> in-process — для кількох реплік backend використовуй зовнішній компонент (напр. API gateway).
+> `API_RATE_LIMIT_MAX` запитів на `API_RATE_LIMIT_WINDOW_SECONDS`). API-лімітер —
+> **розподілений**: sliding window тримається в Redis (Lua-скрипт), тому спільний
+> для всіх реплік backend; при недоступності Redis автоматично вмикається
+> локальний in-process фолбек (`RATE_LIMIT_REDIS_ENABLED=false` вимикає Redis).
 
 | Метод | Шлях | Опис | Доступ |
 |---|---|---|---|

@@ -61,6 +61,7 @@ async def _login_as_admin(client: AsyncClient, factory: async_sessionmaker) -> N
 @pytest_asyncio.fixture
 async def client(db: AsyncEngine) -> AsyncClient:
     settings.redis_events_enabled = False
+    settings.rate_limit_redis_enabled = False
     factory = async_sessionmaker(db, expire_on_commit=False, class_=AsyncSession)
 
     import app.db.session as db_session
