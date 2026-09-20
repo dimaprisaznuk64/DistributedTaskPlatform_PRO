@@ -214,10 +214,17 @@ function connect() {
   const token = localStorage.getItem("access_token") || "";
   const ws = new WebSocket(`${proto}://${location.host}/api/v1/ws/events?token=${token}`);
   ws.onopen = () => { $("dot").classList.add("online"); $("connText").textContent = "live-канал активний"; };
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     $("dot").classList.remove("online");
-    $("connText").textContent = token ? "немає з\'єднання, перепідключення..." : "немає з\'єднання";
-    setTimeout(() => { if (localStorage.getItem("access_token")) connect(); }, 2000);
+    if (event.code === 4401) {
+      $("connText").textContent = "не пройшли авторизацію, увійдіть знову";
+      showLogin();
+      return;
+    }
+    const delay = event.code === 4429 ? 60000 : Math.min(2000 * Math.pow(2, wsRetry++), 30000);
+    $("connText").textContent = token ? `немає з\'єднання, повтор за ${Math.round(delay / 1000)}с...` : "немає з\'єднання";
+    setTimeout(() => { if (localStorage.getItem("access_token")) connect(); }, delay);
+    if (wsRetry > 4) wsRetry = 4;
   };
   ws.onmessage = (event) => {
     let frame;
@@ -227,6 +234,7 @@ function connect() {
   };
 }
 let refreshTimer = null;
+let wsRetry = 0;
 function debounceRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(load, 300);
@@ -246,27 +254,36 @@ async function load() {
 async function handleLogin(event) {
   event.preventDefault();
   $("loginErr").textContent = "";
+  const btn = $("loginForm").querySelector("button");
+  btn.disabled = true;
+  btn.textContent = "Вхід...";
   const body = JSON.stringify({
     username: $("user").value.trim(),
     password: $("pass").value,
   });
-  const response = await fetch("/api/v1/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body,
-  });
-  if (!response.ok) {
-    let detail = "Невірний логін або пароль";
-    try { const e = await response.json(); if (e.detail) detail = e.detail; } catch {}
-    $("loginErr").textContent = detail;
-    return;
+  try {
+    const response = await fetch("/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (!response.ok) {
+      let detail = "Невірний логін або пароль";
+      try { const e = await response.json(); if (e.detail) detail = e.detail; } catch {}
+      $("loginErr").textContent = detail;
+      return;
+    }
+    const data = await response.json();
+    localStorage.setItem("access_token", data.access_token);
+    localStorage.setItem("refresh_token", data.refresh_token);
+    hideLogin();
+    wsRetry = 0;
+    load();
+    connect();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Увійти";
   }
-  const data = await response.json();
-  localStorage.setItem("access_token", data.access_token);
-  localStorage.setItem("refresh_token", data.refresh_token);
-  hideLogin();
-  load();
-  connect();
 }
 window.addEventListener("DOMContentLoaded", () => {
   $("loginForm").addEventListener("submit", handleLogin);

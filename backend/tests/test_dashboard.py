@@ -152,12 +152,17 @@ async def test_ws_connection_limit_returns_4429(client, monkeypatch) -> None:
 
     token = auth_service.create_access_token(1)
     with TestClient(app) as tc:
-        with tc.websocket_connect(f"/api/v1/ws/events?token={token}"):
-            pass
-        with tc.websocket_connect(f"/api/v1/ws/events?token={token}"):
-            pass
-        with pytest.raises(WebSocketDisconnect) as exc_info, tc.websocket_connect(
-            f"/api/v1/ws/events?token={token}"
+        for _ in range(2):
+            with tc.websocket_connect(f"/api/v1/ws/events?token={token}") as ws:
+                while True:
+                    try:
+                        ws.receive_text()
+                    except WebSocketDisconnect:
+                        break
+        with (
+            tc.websocket_connect(f"/api/v1/ws/events?token={token}") as ws,
+            pytest.raises(WebSocketDisconnect) as exc_info,
         ):
-            pass
+            while True:
+                ws.receive_text()
         assert exc_info.value.code == 4429

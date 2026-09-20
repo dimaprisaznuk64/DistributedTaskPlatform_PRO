@@ -112,7 +112,8 @@ Worker помер (нема heartbeat) => Координатор мітить de
 > через query `?token=` (тільки access-токен; refresh і невалідні — `4401`). WS-підключення
 > обмежені на користувача (`WS_CONNECT_LIMIT_MAX` за `WS_CONNECT_LIMIT_WINDOW_SECONDS`,
 > перевищення — `4429`). За замовчуванням створюється admin (`ADMIN_USERNAME`/`ADMIN_PASSWORD`).
-> Усі `/auth/*` обмежені rate limiter'ом (in-process, за IP), а весь API обмежений
+> Усі `/auth/*` обмежені rate limiter'ом (in-process, за IP) — входу вважає лише
+> **невдалі** спроби (успішні скидають лічильник), а весь API обмежений
 > окремим rate limiter'ом (per-user за access-токеном або per-IP для анонімних;
 > `API_RATE_LIMIT_MAX` запитів на `API_RATE_LIMIT_WINDOW_SECONDS`). API-лімітер —
 > **розподілений**: sliding window тримається в Redis (Lua-скрипт), тому спільний

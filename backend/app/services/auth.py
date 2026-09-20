@@ -196,6 +196,7 @@ def require_roles(*roles: str):
 
 
 _login_window: dict[str, list[float]] = {}
+_login_failures: dict[str, list[float]] = {}
 
 
 async def auth_rate_limiter(request: Request) -> None:
@@ -211,3 +212,28 @@ async def auth_rate_limiter(request: Request) -> None:
         )
     timestamps.append(now)
     _login_window[client] = timestamps
+
+
+async def login_failure_limiter(request: Request) -> None:
+    """Стоп-кран для входу за IP: рахує тільки НЕВДАЛІ спроби."""
+    client = request.client.host if request.client else "unknown"
+    now = monotonic()
+    window = now - settings.auth_rate_limit_minutes * 60
+    timestamps = [t for t in _login_failures.get(client, []) if t > window]
+    if len(timestamps) >= settings.auth_rate_limit_max:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Забагато невдалих спроб входу, спробуйте пізніше",
+        )
+
+
+def record_login_failure(client_ip: str) -> None:
+    now = monotonic()
+    window = now - settings.auth_rate_limit_minutes * 60
+    timestamps = [t for t in _login_failures.get(client_ip, []) if t > window]
+    timestamps.append(now)
+    _login_failures[client_ip] = timestamps
+
+
+def clear_login_failures(client_ip: str) -> None:
+    _login_failures.pop(client_ip, None)

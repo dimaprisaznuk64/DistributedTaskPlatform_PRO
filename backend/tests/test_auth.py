@@ -338,6 +338,45 @@ async def test_task_create_ip_limit_returns_429(client, session_factory, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_login_rate_limits_only_failures(client, session_factory, monkeypatch) -> None:
+    monkeypatch.setattr(auth_service.settings, "auth_rate_limit_max", 3)
+    monkeypatch.setattr(auth_service.settings, "auth_rate_limit_minutes", 1.0)
+    auth_service._login_failures.clear()
+
+    for _ in range(3):
+        failed = await client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "nope"}
+        )
+        assert failed.status_code == 401
+    limited = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "nope"}
+    )
+    assert limited.status_code == 429
+
+    auth_service._login_failures.clear()
+    ok = await client.post(
+        "/api/v1/auth/login", json={"username": "admin", "password": "admin"}
+    )
+    assert ok.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_ws_auth_failure_returns_4401(client, monkeypatch) -> None:
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    from app.main import app
+
+    with (
+        TestClient(app).websocket_connect("/api/v1/ws/events?token=bad-token") as ws,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+    ):
+        while True:
+            ws.receive_text()
+    assert exc_info.value.code == 4401
+
+
+@pytest.mark.asyncio
 async def test_deactivated_user_rejected(client, session_factory) -> None:
     await client.post(
         "/api/v1/auth/register",

@@ -36,6 +36,7 @@ async def ws_events(
     token: str = Query(default=""),
 ) -> None:
     """Live-стрічка подій: проксіює Redis pub/sub на дашборд (access-токен у query)."""
+    await websocket.accept()
     user_id = await _authenticate_ws(websocket, token)
     if user_id is None:
         await websocket.close(code=4401)
@@ -47,7 +48,6 @@ async def ws_events(
         await websocket.close(code=4429)
         return
 
-    await websocket.accept()
     try:
         async for frame in events_service.event_stream():
             await websocket.send_text(frame)

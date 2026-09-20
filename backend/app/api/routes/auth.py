@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, datetime
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,12 +56,16 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
-    _: None = Depends(auth.auth_rate_limiter),
+    request: Request,
+    _: None = Depends(auth.login_failure_limiter),
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
+    client = request.client.host if request.client else "unknown"
     user = await auth.get_user_by_username(session, body.username)
     if user is None or not auth.verify_password(body.password, user.password_hash):
+        auth.record_login_failure(client)
         raise HTTPException(status_code=401, detail="Невірний логін або пароль")
+    auth.clear_login_failures(client)
     user.last_login_at = datetime.now(UTC)
     refresh = auth.create_refresh_token(user.id)
     await auth.persist_refresh_token(session, user.id, auth.decode_token(refresh))
