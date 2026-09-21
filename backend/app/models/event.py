@@ -23,6 +23,8 @@ TASK_EVENT_TYPES = (
     "task.requeued",
     "task.dead_lettered",
     "task.dlq_requeued",
+    "task.blocked",
+    "task.unblocked",
 )
 
 

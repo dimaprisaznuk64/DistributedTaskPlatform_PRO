@@ -174,11 +174,24 @@ async def run_coordinator() -> None:
         await asyncio.sleep(settings.retry_scheduler_poll_seconds)
 
 
+async def run_retention() -> None:
+    logger.info("Retention/GC запущено (кожні %.1fс)", settings.retention_cleanup_poll_seconds)
+    while True:
+        try:
+            purged = await coordinator.purge_old_data()
+            if purged:
+                logger.info("GC видалено рядків: %s", purged)
+        except Exception:
+            logger.exception("Retention/GC: помилка тику")
+        await asyncio.sleep(settings.retention_cleanup_poll_seconds)
+
+
 async def main() -> None:
     await asyncio.gather(
         _run_worker_with_reconnect(),
         run_heartbeat(),
         run_coordinator(),
+        run_retention(),
     )
 
 

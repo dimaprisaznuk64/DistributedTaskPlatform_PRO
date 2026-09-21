@@ -3,13 +3,14 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import metrics
 from app.core.config import settings
 from app.db.session import session_factory
 from app.models.attempt import TaskAttempt
+from app.models.audit import AuditLog
 from app.models.outbox import OutboxEvent
 from app.models.task import Task
 from app.models.worker import Worker
@@ -269,3 +270,85 @@ async def recover_stuck_tasks(limit: int = 50) -> int:
     for task in stuck:
         events_service.schedule_task_event("task.updated", task)
     return count
+
+
+async def _delete_old_rows(session, model, column, cutoff, limit: int) -> int:
+    ids = list(
+        (
+            await session.execute(
+                select(model.id).where(column <= cutoff).order_by(model.id.asc()).limit(limit)
+            )
+        ).scalars()
+    )
+    if not ids:
+        return 0
+    await session.execute(delete(model).where(model.id.in_(ids)))
+    return len(ids)
+
+
+async def purge_old_data(limit: int | None = None) -> int:
+    """Retention/GC: чистить terminal-задачі, overbox-sent записи та audit-лог.
+
+    TaskAttempt/TaskEvent каскадно видаляються за FK у PostgreSQL.
+    """
+    limit = limit or settings.retention_cleanup_batch_size
+    now = datetime.now(UTC)
+    deleted = 0
+    async with session_factory() as session:
+        done_cutoff = now - timedelta(days=settings.retention_done_tasks_days)
+        if settings.retention_done_tasks_days > 0:
+            ids = list(
+                (
+                    await session.execute(
+                        select(Task.id)
+                        .where(Task.finished_at.is_not(None), Task.finished_at <= done_cutoff)
+                        .order_by(Task.id.asc())
+                        .limit(limit)
+                    )
+                ).scalars()
+            )
+            if ids:
+                await session.execute(delete(Task).where(Task.id.in_(ids)))
+                deleted += len(ids)
+                await session.flush()
+        if settings.retention_dlq_tasks_days > 0:
+            dlq_cutoff = now - timedelta(days=settings.retention_dlq_tasks_days)
+            ids = list(
+                (
+                    await session.execute(
+                        select(Task.id)
+                        .where(
+                            Task.status == "dead_letter",
+                            Task.dlq_retry_at.is_(None),
+                            Task.finished_at <= dlq_cutoff,
+                        )
+                        .order_by(Task.id.asc())
+                        .limit(limit)
+                    )
+                ).scalars()
+            )
+            if ids:
+                await session.execute(delete(Task).where(Task.id.in_(ids)))
+                deleted += len(ids)
+                await session.flush()
+        if settings.retention_outbox_sent_days > 0:
+            outbox_cutoff = now - timedelta(days=settings.retention_outbox_sent_days)
+            deleted += await _delete_old_rows(
+                session,
+                OutboxEvent,
+                OutboxEvent.processed_at,
+                outbox_cutoff,
+                limit,
+            )
+            await session.flush()
+        if settings.retention_audit_days > 0:
+            audit_cutoff = now - timedelta(days=settings.retention_audit_days)
+            deleted += await _delete_old_rows(
+                session, AuditLog, AuditLog.created_at, audit_cutoff, limit
+            )
+            await session.flush()
+        await session.commit()
+    if deleted:
+        logger.info("GC видалено застарілих рядків: %s", deleted)
+        metrics.retention_deleted_total.labels(table="all").inc(deleted)
+    return deleted

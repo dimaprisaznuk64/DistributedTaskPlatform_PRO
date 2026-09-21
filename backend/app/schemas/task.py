@@ -19,6 +19,11 @@ class TaskCreate(BaseModel):
     schedule_at: datetime | None = Field(
         default=None, description="Запуск не раніше цього часу (UTC)"
     )
+    depends_on: list[int] | None = Field(
+        default=None,
+        max_length=100,
+        description="ID батьківських задач: запуститься, коли всі вони успішно завершаться",
+    )
 
 
 class AttemptInfo(BaseModel):
@@ -61,6 +66,7 @@ class TaskInfo(BaseModel):
     result: dict[str, Any] | None
     last_error: str | None
     created_by: int | None
+    batch_id: int | None = None
     dlq_requeue_count: int = 0
     dlq_retry_at: datetime | None = None
     created_at: datetime
@@ -96,3 +102,22 @@ class CancelResult(BaseModel):
 
 class CreateResult(BaseModel):
     task: TaskInfo
+
+
+class BulkCreateRequest(BaseModel):
+    tasks: list[TaskCreate] = Field(min_length=1, max_length=1000)
+
+
+class BulkOperationItem(BaseModel):
+    task_id: int
+    reason: str = ""
+
+
+class BulkOperationResult(BaseModel):
+    total: int
+    succeeded: list[TaskInfo]
+    conflicts: list[BulkOperationItem]
+
+
+class BulkIdsRequest(BaseModel):
+    task_ids: list[int] = Field(min_length=1, max_length=1000)

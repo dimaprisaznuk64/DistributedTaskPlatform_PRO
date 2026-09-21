@@ -162,7 +162,16 @@ async def get_current_user(
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Не авторизовано")
     try:
-        payload = decode_token(credentials.credentials)
+        token = credentials.credentials
+        if token.startswith(settings.api_token_prefix):
+            user = await _authenticate_api_token(token)
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Недійсний або відкликаний API-токен",
+                )
+            return user
+        payload = decode_token(token)
         if payload.get("type") != TOKEN_TYPE_ACCESS:
             raise jwt.InvalidTokenError
         user_id = int(payload["sub"])
@@ -179,6 +188,23 @@ async def get_current_user(
             detail="Користувача не знайдено",
         )
     return user
+
+
+async def _authenticate_api_token(token: str) -> User | None:
+    """Аутентифікація за постійним API-токеном: оновлює last_used_at."""
+    from app.services import api_tokens
+
+    async with session_factory() as session:
+        record = await api_tokens.authenticate(session, token)
+        if record is None:
+            return None
+        user = await get_user_by_id(session, record.user_id)
+        if user is None or not user.is_active:
+            return None
+        record.last_used_at = datetime.now(UTC)
+        await session.commit()
+        # віддаємо користувача поза сесією; це безпечно (Identity Map не критична)
+        return user
 
 
 def require_roles(*roles: str):

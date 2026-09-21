@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Integer, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -44,6 +44,9 @@ class Task(Base, TimestampMixin):
     result: Mapped[dict | None] = mapped_column(JSON)
     last_error: Mapped[str | None] = mapped_column(String(2000))
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("task_batches.id", ondelete="SET NULL"), index=True
+    )
     dlq_requeue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     dlq_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

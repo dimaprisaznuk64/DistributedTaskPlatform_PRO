@@ -44,6 +44,12 @@
   .log div { padding: 4px 0; border-bottom: 1px dashed var(--border); }
   .log .t { color: var(--muted); }
   .full { grid-column: 1 / -1; }
+  .pager { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .pager button { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+  .pager button:disabled { opacity: .4; cursor: default; }
+  .pager .page { font-size: 12px; color: var(--muted); }
+  .mini-bar { display: flex; height: 6px; background: #0b1220; border-radius: 999px; overflow: hidden; margin-bottom: 3px; }
+  .mini-bar span { height: 100%; }
   .login-overlay {
     position: fixed; inset: 0; background: rgba(2, 6, 23, .72); z-index: 10;
     display: flex; align-items: center; justify-content: center;
@@ -102,10 +108,22 @@
     </table>
   </section>
   <section>
-    <h2>Останні задачі</h2>
+    <h2>Задачі</h2>
     <table>
       <thead><tr><th>ID</th><th>Тип</th><th>Пріоритет</th><th>Стан</th><th>Спроби</th></tr></thead>
       <tbody id="tasks"></tbody>
+    </table>
+    <footer class="pager">
+      <button id="prevPage">← Назад</button>
+      <span class="page" id="pageInfo"></span>
+      <button id="nextPage">Вперед →</button>
+    </footer>
+  </section>
+  <section class="full">
+    <h2>Батчі завдань</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Назва</th><th>Всього</th><th>У черзі</th><th>Викон.</th><th>Успіш.</th><th>Помил.</th><th>Скасов.</th><th>Прогрес</th><th></th></tr></thead>
+      <tbody id="batches"></tbody>
     </table>
   </section>
   <section class="full">
@@ -161,11 +179,17 @@ function refreshWorkers(items) {
      <td>${new Date(w.last_heartbeat_at).toLocaleTimeString()}</td></tr>`
   ).join("") || `<tr><td colspan="5" style="color:var(--muted)">Воркерів немає</td></tr>`;
 }
-function refreshTasks(items) {
+function refreshTasks(items, total) {
   $("tasks").innerHTML = items.map(task =>
     `<tr><td>${task.id}</td><td>${task.task_type}</td><td>${task.priority}</td>
      <td>${badge("st", task.status)}</td><td>${task.attempts}</td></tr>`
   ).join("") || `<tr><td colspan="5" style="color:var(--muted)">Задач немає</td></tr>`;
+  const pages = Math.max(1, Math.ceil((total || 0) / taskLimit));
+  $("pageInfo").textContent = total
+    ? `стор. ${Math.floor(taskOffset / taskLimit) + 1} з ${pages} (усього ${total})`
+    : "задач немає";
+  $("prevPage").disabled = taskOffset === 0;
+  $("nextPage").disabled = taskOffset + taskLimit >= (total || 0);
 }
 function refreshDlq(items) {
   $("dlq").innerHTML = items.map(task =>
@@ -186,6 +210,28 @@ async function retryDlq(taskId, btn) {
     await api(`/api/v1/tasks/${taskId}/retry`, { method: "POST" });
   } catch (e) { /* 401 handled in api() */ }
   load();
+}
+function refreshBatches(items) {
+  $("batches").innerHTML = items.map(b => {
+    const p = b.progress || {};
+    const total = p.total || 0;
+    const completed = p.completed || 0;
+    const pct = total ? Math.round((completed / total) * 100) : 0;
+    const left = (p.queued ?? 0) + (p.running ?? 0) + (p.pending ?? 0);
+    return `<tr><td>${b.id}</td><td>${b.name || "—"}</td>
+      <td>${total}</td><td>${p.queued ?? 0}</td><td>${p.running ?? 0}</td>
+      <td>${p.succeeded ?? 0}</td><td>${p.failed ?? 0}</td><td>${p.cancelled ?? 0}</td>
+      <td><div class="mini-bar"><span style="width:${pct}%;background:var(--ok)"></span></div>
+          <small style="color:var(--muted)">${completed}/${total} (${pct}%)</small></td>
+      <td><button class="btn" data-cancel="${b.id}" ${left === 0 ? "disabled" : ""}>Скасувати</button></td></tr>`;
+  }).join("") || `<tr><td colspan="10" style="color:var(--muted)">Батчів немає</td></tr>`;
+  $("batches").querySelectorAll("[data-cancel]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try { await api(`/api/v1/batches/${btn.dataset.cancel}/cancel`, { method: "POST" }); } catch {}
+      load();
+    });
+  });
 }
 function pushLog(frame) {
   const el = document.createElement("div");
@@ -236,21 +282,31 @@ function connect() {
 }
 let refreshTimer = null;
 let wsRetry = 0;
+let taskOffset = 0;
+const taskLimit = 10;
 function debounceRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(load, 300);
 }
+async function loadTasks() {
+  const tasks = await api(`/api/v1/tasks?limit=${taskLimit}&offset=${taskOffset}`).then(r => r.json());
+  refreshTasks(tasks.items, tasks.total);
+}
+async function loadBatches() {
+  const batches = await api("/api/v1/batches?limit=20").then(r => r.json());
+  refreshBatches(batches.items);
+}
 async function load() {
-  const [stats, workers, tasks, dlq] = await Promise.all([
+  const [stats, workers, dlq] = await Promise.all([
     api("/api/v1/stats").then(r => r.json()),
     api("/api/v1/workers").then(r => r.json()),
-    api("/api/v1/tasks?limit=10").then(r => r.json()),
     api("/api/v1/tasks?status=dead_letter&limit=50").then(r => r.json()),
   ]);
   refreshStats(stats);
   refreshWorkers(workers);
-  refreshTasks(tasks.items);
   refreshDlq(dlq.items);
+  loadTasks();
+  loadBatches();
 }
 async function handleLogin(event) {
   event.preventDefault();
@@ -288,6 +344,8 @@ async function handleLogin(event) {
 }
 window.addEventListener("DOMContentLoaded", () => {
   $("loginForm").addEventListener("submit", handleLogin);
+  $("prevPage").addEventListener("click", () => { taskOffset = Math.max(0, taskOffset - taskLimit); loadTasks(); });
+  $("nextPage").addEventListener("click", () => { taskOffset += taskLimit; loadTasks(); });
   if (!localStorage.getItem("access_token")) { showLogin(); return; }
   load();
   connect();

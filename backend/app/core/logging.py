@@ -48,7 +48,7 @@ class JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in _RESERVED_KEYS:
                 continue
-            if isinstance(value, (str, int, float, bool, dict, list)):
+            if isinstance(value, str | int | float | bool | dict | list):
                 payload[key] = value
         return json.dumps(payload, ensure_ascii=False, default=str)
 

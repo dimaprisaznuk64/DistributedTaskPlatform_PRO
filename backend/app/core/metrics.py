@@ -25,6 +25,12 @@ workers_active = Gauge("workers_active", "Живі воркери")
 workers_total = Gauge("workers_total", "Усього зареєстрованих воркерів")
 outbox_pending = Gauge("outbox_pending", "Невідправлені outbox-події")
 rabbitmq_queue_depth = Gauge("rabbitmq_queue_depth", "Повідомлення у RabbitMQ-черзі")
+webhook_deliveries_total = Counter(
+    "webhook_deliveries_total", "Webhook-доставки за результатом", ["outcome"]
+)
+retention_deleted_total = Counter(
+    "retention_deleted_total", "Видалено рядків GC за таблицею", ["table"]
+)
 http_requests_total = Counter(
     "http_requests_total", "HTTP-запити (метод, шлях, статус)", ["method", "path", "status"]
 )

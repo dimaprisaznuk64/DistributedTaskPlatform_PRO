@@ -33,12 +33,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     setup_logging()
     await auth_service.bootstrap_admin()
     relay_task = asyncio.create_task(_outbox_relay_loop())
+    webhook_task = asyncio.create_task(_webhook_dispatcher_loop())
     try:
         yield
     finally:
         relay_task.cancel()
+        webhook_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await relay_task
+            await webhook_task
         await outbox_service.close_connection()
         await close_redis_client()
 
@@ -51,6 +54,20 @@ async def _outbox_relay_loop() -> None:
         except Exception:
             logger.exception("Outbox relay: помилка тику")
         await asyncio.sleep(settings.outbox_poll_seconds)
+
+
+async def _webhook_dispatcher_loop() -> None:
+    from app.services import webhooks as webhooks_service
+
+    logger.info("Webhook-диспетчер запущено (кожні %.1fс)", settings.webhook_poll_seconds)
+    while True:
+        try:
+            dispatched = await webhooks_service.dispatch_due()
+            if dispatched:
+                logger.info("Webhook-доставок оброблено: %s", dispatched)
+        except Exception:
+            logger.exception("Webhook-диспетчер: помилка тику")
+        await asyncio.sleep(settings.webhook_poll_seconds)
 
 
 app = FastAPI(

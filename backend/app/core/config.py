@@ -69,6 +69,23 @@ class Settings(BaseSettings):
     task_create_limit_max: int = 30
     task_create_limit_window_seconds: float = 60.0
 
+    batch_max_tasks: int = 1000
+
+    api_token_prefix: str = "tp_"
+    api_token_expire_days: int = 90
+
+    webhook_poll_seconds: float = 5.0
+    webhook_timeout_seconds: float = 10.0
+    webhook_max_attempts: int = 5
+    webhook_retry_backoff_seconds: float = 60.0
+
+    retention_cleanup_poll_seconds: float = 3600.0
+    retention_cleanup_batch_size: int = 200
+    retention_done_tasks_days: int = 30
+    retention_dlq_tasks_days: int = 30
+    retention_outbox_sent_days: int = 7
+    retention_audit_days: int = 365
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
